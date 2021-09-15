@@ -40,10 +40,11 @@ class Validator:
                 data,
                 append_errors=False,
                 message='',
-                field_name=''):
+                field_name='',
+                strict=False):
         status = False
         try:
-            if cast_type.__qualname__ in ('int', 'float'):
+            if cast_type.__qualname__ in ('int', 'float') and strict == False:
                 cast_type(data)
 
             else:
@@ -54,12 +55,13 @@ class Validator:
 
         except (TypeError, ValueError):
 
-            self.format_error('type_invalid',
-                              (cast_type.__qualname__, type(data).__qualname__),
-                              message,
-                              field_name,
-                              append_errors,
-                              raised_exception_type=ValueError)
+            self.format_error(
+                'type_invalid',
+                (cast_type.__qualname__, type(data).__qualname__),
+                message,
+                field_name,
+                append_errors,
+                raised_exception_type=ValueError)
 
         return status
 
