@@ -4,5 +4,8 @@ error_messages = {
     'value_not_even': 'Value not even',
     'field_value_not_even': 'Value of %s is not even',
     'value_not_odd': 'Value not odd',
-    'field_value_not_odd': 'Value of %s is not odd'
+    'field_value_not_odd': 'Value of %s is not odd',
+    'length_invalid': '%s has an invalid length',
+    'unkown_exception': 'Unknown exception in %s: %s',
+    'invalid_email': 'Invalid email'
 }
