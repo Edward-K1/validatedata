@@ -1,7 +1,6 @@
+from collections import OrderedDict
 from functools import wraps
 from inspect import getfullargspec
-
-from collections import OrderedDict
 
 from .validator import Validator
 
@@ -55,7 +54,7 @@ def validate(rule, raise_exceptions=False, is_class=False):
             if result.ok:
                 return func(obj, *args, **kwargs)
             else:
-                return {'errors':result.errors}
+                return {'errors': result.errors}
 
         return wrapper
 
@@ -76,9 +75,9 @@ def validate_data(data, rule, raise_exceptions=False, defaults={}):
 def expand_rule(rule):
     expanded_rules = []
 
-    if not isinstance(rule, (str, list, tuple, dict)):
+    if not isinstance(rule, (str, tuple, dict)):
         raise TypeError(
-            'Validation rule(s) must be of type: str, list, tuple, or dict')
+            'Validation rule(s) must be of type: str, tuple, or dict')
 
     if len(str(rule)) < 3:
         raise ValueError(f'Invalid rule {rule}')
@@ -103,6 +102,10 @@ def expand_rule(rule):
 
         if _type in {'int', 'float'}:
             rule_dict['strict'] = True if ':strict' in rule else False
+
+        # prevent ast.literal_eval on object data if user hasn't requested for it
+        if _type in {'bool', 'dict', 'list', 'set', 'tuple'}:
+            rule_dict['strict'] = True
 
         if _type == 'regex':
             if len(rule.split(':')) < 2:
@@ -129,10 +132,16 @@ def expand_rule(rule):
                 expanded_rules.append(expand_rule_string(_rule))
 
             elif isinstance(_rule, dict):
-                expanded_rules.append(_rule)
+                new_rule = _rule
+                if _rule.get('type') in {
+                        'bool', 'dict', 'list', 'set', 'tuple'
+                }:
+                    if 'strict' not in _rule:
+                        new_rule['strict'] = True
+                expanded_rules.append(new_rule)
 
             else:
                 raise TypeError(
-                    'Error expanding rules: unsupported type in list')
+                    'Error expanding rules: expecting string or dict')
 
     return expanded_rules

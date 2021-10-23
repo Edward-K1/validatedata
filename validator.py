@@ -18,6 +18,7 @@ class Validator:
     def __init__(self, native_types, basic_types, extended_types,
                  raise_exceptions):
         self.errors = []
+        self.error_keys = []
         self.keys_with_defaults = {}
         self.basic_types = basic_types
         self.extended_types = extended_types
@@ -39,10 +40,11 @@ class Validator:
                 self.validate_rule(key, value, rules[index])
 
         elif isinstance(data, (list, tuple)):
-            pass
+            for count, value in enumerate(data):
+                self.validate_rule('', value, rules[count])
 
         elif isinstance(data, str):
-            pass
+            self.validate_rule('', data, rules)
 
         else:
             raise TypeError('the data parameter should be a list or tuple')
@@ -69,131 +71,174 @@ class Validator:
             error_key = error_key or rule_error_key
             self.format_error(error_key, (key, ), rules, key, rule_key)
 
+        def raise_invalid_rule(data_type, rule_name):
+            raise TypeError(f'{rule_name} not valid for {data_type}')
+
         for rule_key, rule_value in rules.items():
-            if rule_key in _ALL_RULES and rule_key not in {
-                    'message', 'type', 'strict'
-            }:
 
-                if rule_key == 'length':
-                    rule_error_key = 'length_invalid'
-                    if not isinstance(rule_value, int):
-                        raise TypeError('int value expected for length')
+            if rule_key == 'length':
+                rule_error_key = 'length_invalid'
+                if not isinstance(rule_value, int):
+                    raise TypeError('int value expected for length')
 
+                if _type in self.basic_types_plus_regex:
+                    if len(f'{value}') != rule_value:
+                        append_error()
+
+                else:
+
+                    if hasattr(value, '__len__'):
+                        if len(value) != rule_value:
+                            append_error('object_length_invalid')
+                    else:
+                        raise Exception('object has no length property')
+
+            elif rule_key == 'options':
+                rule_error_key = 'not_in_options'
+                if _type in self.basic_types_plus_regex:
+                    if value not in set(rule_value):
+                        append_error()
+                else:
+                    if not all(val in set(rule_value) for val in value):
+                        append_error()
+
+            elif rule_key == 'excludes':
+                rule_error_key = 'not_excluded'
+                if _type in self.basic_types_plus_regex:
+
+                    if value in set(rule_value):
+                        append_error()
+
+                else:
+                    if any(val in set(value) for val in rule_value):
+                        append_error()
+
+            elif rule_key == 'contains':
+                rule_error_key = 'missing_required_data'
+                if isinstance(rule_value, str):
                     if _type in self.basic_types_plus_regex:
-                        if len(f'{value}') != rule_value:
+                        if rule_value not in str(value):
                             append_error()
+
+                    elif _type == 'dict':
+                        if rule_value not in value:
+                            append_error('missing_required_keys')
 
                     else:
+                        if rule_value not in set(value):
+                            append_error('missing_required_values')
 
-                        if not hasattr(value,
-                                       '__len__') or len(value) != rule_value:
-                            append_error()
-
-                elif rule_key == 'options':
-                    rule_error_key = 'not_in_options'
-                    if _type in self.basic_types_plus_regex:
-                        if value not in set(rule_value):
-                            append_error()
-                    else:
-                        if not all(val in set(rule_value) for val in value):
-                            append_error()
-
-                elif rule_key == 'excludes':
-                    rule_error_key = 'not_excluded'
-                    if _type in self.basic_types_plus_regex:
-
-                        if value in set(rule_value):
-                            append_error()
-
-                    else:
-                        if any(val in set(value) for val in rule_value):
-                            append_error()
-
-                elif rule_key == 'contains':
-                    rule_error_key = 'does_not_contain'
-                    if isinstance(rule_value, str):
+                else:
+                    if isinstance(rule_value, (list, tuple)):
+                        #Todo: modify so that user can know the specific values missing
                         if _type in self.basic_types_plus_regex:
-                            if rule_value not in str(value):
+
+                            if not all(val in str(value)
+                                       for val in rule_value):
                                 append_error()
 
                         elif _type == 'dict':
-                            if rule_value not in value:
-                                append_error()
 
+                            if not all(val in set(value.keys())
+                                       for val in rule_value):
+                                append_error('missing_required_keys')
                         else:
-                            if rule_value not in set(value):
-                                append_error()
+                            if not all(val in set(value)
+                                       for val in rule_value):
+                                append_error('missing_required_values')
+
+            elif rule_key == 'expression':
+                regex = None
+                rule_error_key = 'does_not_match_regex'
+                try:
+                    regex = re.compile(rule_value, re.VERBOSE)
+
+                except Exception as ex:
+                    raise Exception(f'error compiling regex: {ex}')
+
+                if regex.match(value) == None:
+                    append_error()
+
+            elif rule_key == 'startswith':
+                rule_error_key = 'does_not_startwith'
+                if _type in self.basic_types_plus_regex:
+                    if not str(value).startswith(rule_value):
+                        append_error()
+                else:
+                    if _type in {'list', 'tuple'}:
+                        if not value or value[0] != rule_value:
+                            append_error()
 
                     else:
-                        if isinstance(rule_value, (list, tuple)):
-                            #Todo: modify so that user can know the specific values missing
-                            if _type in self.basic_types_plus_regex:
+                        raise_invalid_rule(_type, rule_key)
 
-                                if not all(val in str(value)
-                                           for val in rule_value):
-                                    append_error()
-
-                            elif _type == 'dict':
-
-                                if not all(val in set(value.keys())
-                                           for val in rule_value):
-                                    append_error()
-                            else:
-                                if not all(val in set(value)
-                                           for val in rule_value):
-                                    append_error()
-
-                elif rule_key == 'expression':
-                    regex = None
-                    rule_error_key = 'does_not_match_regex'
-                    try:
-                        regex = re.compile(rule_value, re.VERBOSE)
-
-                    except Exception as ex:
-                        raise Exception(f'Error Compiling Regex: {ex}')
-
-                    if regex.match(value) == None:
+            elif rule_key == 'endswith':
+                rule_error_key = 'does_not_endwith'
+                if _type in self.basic_types_plus_regex:
+                    if not str(value).endswith(rule_value):
                         append_error()
-
-                elif rule_key == 'startswith':
-                    rule_error_key = 'does_not_startwith'
-                    if _type in self.basic_types_plus_regex:
-                        if not str(value).startswith(rule_value):
-                            append_error()
                     else:
                         if _type in {'list', 'tuple'}:
-                            if not value or value[0] != rule_value:
+                            if not value or value[-1] != rule_value:
                                 append_error()
 
-                elif rule_key == 'endswith':
-                    rule_error_key = 'does_not_endwith'
-                    if _type in self.basic_types_plus_regex:
-                        if not str(value).endswith(rule_value):
-                            append_error()
                         else:
-                            if _type in {'list', 'tuple'}:
-                                if not value or value[-1] != rule_value:
-                                    append_error()
+                            raise_invalid_rule(_type, rule_key)
 
-                elif rule_key == 'range':
-                    rule_error_key = 'not_in_range'
-                    if not isinstance(rule_value, (list, tuple)):
-                        raise TypeError('list or tuple expected for range')
+            elif rule_key == 'range':
+                rule_error_key = 'not_in_range'
+                if not isinstance(rule_value, (list, tuple)):
+                    raise TypeError('list or tuple expected for range')
 
-                    if len(rule_value) != 2:
-                        raise ValueError('range object should have 2 values')
+                if len(rule_value) != 2:
+                    raise ValueError('range object should have 2 values')
 
-                    if _type in {'int', 'float', 'even', 'odd'}:
-                        pass
+                if _type in {'int', 'float', 'even', 'odd'}:
+                    min_value = float(
+                        '-inf') if rule_value[0] == 'any' else rule_value[0]
+                    max_value = float(
+                        'inf') if rule_value[1] == 'any' else rule_value[1]
+                    cast_value = literal_eval(str(value))
 
-                    elif _type == 'date':
-                        pass
+                    if not (cast_value >= min_value
+                            and cast_value <= max_value):
+                        append_error('number_not_in_range')
 
-                    elif _type == 'str':
-                        pass
+                elif _type == 'date':
+                    min_date = None
+                    max_date = None
+                    cast_date = value if isinstance(
+                        value, datetime) else parse_date(value)
 
-                    elif _type in {'list', 'tuple'}:
-                        pass
+                    if isinstance(value, datetime):
+                        min_date = value if rule_value[
+                            0] == 'any' else parse_date(rule_value[0])
+                        max_date = value if rule_value[
+                            1] == 'any' else parse_date(rule_value[1])
+
+                    else:
+                        min_date = parse_date(
+                            value) if rule_value[0] == 'any' else parse_date(
+                                rule_value[0])
+                        max_date = parse_date(
+                            value) if rule_value[1] == 'any' else parse_date(
+                                rule_value[1])
+
+                    if not (cast_date >= min_date and cast_date <= max_date):
+                        append_error('date_not_in_range')
+
+                elif _type == 'str':
+                    if not len(value) >= rule_value[0] and len(
+                            value) <= rule_value[1]:
+                        append_error('string_not_in_range')
+
+                elif _type in {'list', 'tuple'}:
+                    if not len(value) >= rule_value[0] and len(
+                            value) <= rule_value[1]:
+                        append_error('list_or_tuple_not_in_range')
+
+                else:
+                    raise_invalid_rule(_type, rule_key)
 
     def is_type(self,
                 data_type,
@@ -206,7 +251,7 @@ class Validator:
 
         status = False
 
-        def raise_type_error(error_key='type_invalid'):
+        def append_type_error(error_key='type_invalid'):
             self.format_error(error_key, (data_type, type(data).__qualname__),
                               message,
                               rules,
@@ -220,15 +265,15 @@ class Validator:
                 if strict == False:
                     if not isinstance(literal_eval(str(data)),
                                       self.native_types.get(data_type)):
-                        raise_type_error()
+                        append_type_error()
                 else:
                     if not isinstance(data, data_type):
-                        raise_type_error()
+                        append_type_error()
 
             elif data_type == 'date':
-                date = parse_date(data)
-                if not isinstance(date, datetime):
-                    raise_type_error('invalid_date')
+                if not isinstance(data, datetime):
+                    if not isinstance(parse_date(data), datetime):
+                        append_type_error('invalid_date')
 
             elif data_type == 'email':
                 email_re = re.compile(
@@ -237,22 +282,22 @@ class Validator:
                 |(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$""", re.VERBOSE)
 
                 if email_re.match(data) == None:
-                    raise_type_error('invalid_email')
+                    append_type_error('invalid_email')
 
             elif data_type == 'even':
                 if not (self.is_type('int', data, strict=strict)
                         and int(data) % 2 == 0):
-                    raise_type_error('not_even')
+                    append_type_error('not_even')
 
             elif data_type == 'odd':
                 if not (self.is_type('int', data, strict=strict)
                         and int(data) % 2 == 1):
-                    raise_type_error('not_odd')
+                    append_type_error('not_odd')
 
             status = True
 
         except Exception:
-            raise_type_error()
+            append_type_error()
 
         return status
 
