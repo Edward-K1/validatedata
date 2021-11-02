@@ -23,7 +23,7 @@ class Validator:
         self.basic_types = basic_types
         self.extended_types = extended_types
         self.raise_exceptions = raise_exceptions
-        self.basic_types_plus_regex = set(basic_types + ('regex'))
+        self.basic_types_plus_regex = set(basic_types + ('regex', ))
         self.native_types = {f'{nt.__qualname__}': nt for nt in native_types}
 
     def validate_object(self, data, rules, defaults):
@@ -37,7 +37,13 @@ class Validator:
                     # skip default values
                     if value == defaults.get(key): continue
 
-                self.validate_rule(key, value, rules[index])
+                current_rules = rules[index]
+                if not self.is_type(current_rules.get('type'), value,
+                                    current_rules, True, '', key,
+                                    current_rules.get('strict', False)):
+                    break
+
+                self.validate_rule(key, value, current_rules)
 
         elif isinstance(data, (list, tuple)):
             for count, value in enumerate(data):
@@ -62,10 +68,6 @@ class Validator:
         rule_error_key = 'type_invalid'
 
         if 'message' not in rules: rules['message'] = ''
-
-        if not self.is_type(_type, value, rules, True, rules, key,
-                            rules.get('strict', False)):
-            return
 
         def append_error(error_key=''):
             error_key = error_key or rule_error_key
@@ -177,13 +179,13 @@ class Validator:
                 if _type in self.basic_types_plus_regex:
                     if not str(value).endswith(rule_value):
                         append_error()
-                    else:
-                        if _type in {'list', 'tuple'}:
-                            if not value or value[-1] != rule_value:
-                                append_error()
+                else:
+                    if _type in {'list', 'tuple'}:
+                        if not value or value[-1] != rule_value:
+                            append_error()
 
-                        else:
-                            raise_invalid_rule(_type, rule_key)
+                    else:
+                        raise_invalid_rule(_type, rule_key)
 
             elif rule_key == 'range':
                 rule_error_key = 'not_in_range'
@@ -193,16 +195,10 @@ class Validator:
                 if len(rule_value) != 2:
                     raise ValueError('range object should have 2 values')
 
-                if _type in {'int', 'float', 'even', 'odd'}:
-                    min_value = float(
-                        '-inf') if rule_value[0] == 'any' else rule_value[0]
-                    max_value = float(
-                        'inf') if rule_value[1] == 'any' else rule_value[1]
-                    cast_value = literal_eval(str(value))
-
-                    if not (cast_value >= min_value
-                            and cast_value <= max_value):
-                        append_error('number_not_in_range')
+                if _type == 'str':
+                    if not len(value) >= rule_value[0] and len(
+                            value) <= rule_value[1]:
+                        append_error('string_not_in_range')
 
                 elif _type == 'date':
                     min_date = None
@@ -227,15 +223,21 @@ class Validator:
                     if not (cast_date >= min_date and cast_date <= max_date):
                         append_error('date_not_in_range')
 
-                elif _type == 'str':
-                    if not len(value) >= rule_value[0] and len(
-                            value) <= rule_value[1]:
-                        append_error('string_not_in_range')
-
                 elif _type in {'list', 'tuple'}:
                     if not len(value) >= rule_value[0] and len(
                             value) <= rule_value[1]:
                         append_error('list_or_tuple_not_in_range')
+
+                elif _type in {'int', 'float', 'even', 'odd'}:
+                    min_value = float(
+                        '-inf') if rule_value[0] == 'any' else rule_value[0]
+                    max_value = float(
+                        'inf') if rule_value[1] == 'any' else rule_value[1]
+                    cast_value = literal_eval(str(value))
+
+                    if not (cast_value >= min_value
+                            and cast_value <= max_value):
+                        append_error('number_not_in_range')
 
                 else:
                     raise_invalid_rule(_type, rule_key)
@@ -253,7 +255,6 @@ class Validator:
 
         def append_type_error(error_key='type_invalid'):
             self.format_error(error_key, (data_type, type(data).__qualname__),
-                              message,
                               rules,
                               field_name,
                               'type',
@@ -263,25 +264,34 @@ class Validator:
         try:
             if data_type in set(self.native_types.keys()):
                 if strict == False:
-                    if not isinstance(literal_eval(str(data)),
-                                      self.native_types.get(data_type)):
+                    try:
+                        if not isinstance(literal_eval(str(data)),
+                                          self.native_types.get(data_type)):
+                            append_type_error()
+
+                    except (TypeError, ValueError):
                         append_type_error()
                 else:
-                    if not isinstance(data, data_type):
+                    if not isinstance(data, self.native_types.get(data_type)):
                         append_type_error()
 
             elif data_type == 'date':
                 if not isinstance(data, datetime):
+
                     if not isinstance(parse_date(data), datetime):
                         append_type_error('invalid_date')
 
             elif data_type == 'email':
-                email_re = re.compile(
-                    """^(([^<>()[\]\\.,;:\s@\"]+(\.[^<>()[\]\\.,;:\s@\"]+)*)
-                |(\".+\"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])
-                |(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$""", re.VERBOSE)
+                try:
+                    email_re = re.compile(
+                        """^(([^<>()[\]\\.,;:\s@\"]+(\.[^<>()[\]\\.,;:\s@\"]+)*)
+                    |(\".+\"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])
+                    |(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$""", re.VERBOSE)
 
-                if email_re.match(data) == None:
+                    if email_re.match(data) == None:
+                        append_type_error('invalid_email')
+
+                except Exception:
                     append_type_error('invalid_email')
 
             elif data_type == 'even':
@@ -320,7 +330,7 @@ class Validator:
             error_fields = (ev[0], field, ev[1]) if field else (ev[0], ev[1])
             formatted_message = custom_message or raw_error % error_fields
         else:
-            formatted_message = custom_message or raw_error % error_values
+            formatted_message = custom_message or raw_error
 
         if append_errors:
             self.errors.append(formatted_message)

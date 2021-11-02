@@ -67,6 +67,21 @@ def validate_data(data, rule, raise_exceptions=False, defaults={}):
                           raise_exceptions)
     expanded_rule = expand_rule(rule)
 
+    if isinstance(expanded_rule, dict):
+        data = OrderedDict(data)
+        dict_rules = []
+        for key in data:
+            key_rule = expanded_rule['keys'][key]
+            if key_rule.get('type') in {
+                        'bool', 'dict', 'list', 'set', 'str', 'tuple'
+                }:
+                    if 'strict' not in key_rule:
+                        key_rule['strict'] = True
+
+            dict_rules.append(key_rule)
+            
+        expanded_rule = dict_rules
+
     result = validator.validate_object(data, expanded_rule, defaults)
 
     return result
@@ -104,7 +119,7 @@ def expand_rule(rule):
             rule_dict['strict'] = True if ':strict' in rule else False
 
         # prevent ast.literal_eval on object data if user hasn't requested for it
-        if _type in {'bool', 'dict', 'list', 'set', 'tuple'}:
+        if _type in {'bool', 'dict', 'list', 'set', 'str', 'tuple'}:
             rule_dict['strict'] = True
 
         if _type == 'regex':
@@ -134,7 +149,7 @@ def expand_rule(rule):
             elif isinstance(_rule, dict):
                 new_rule = _rule
                 if _rule.get('type') in {
-                        'bool', 'dict', 'list', 'set', 'tuple'
+                        'bool', 'dict', 'list', 'set', 'str', 'tuple'
                 }:
                     if 'strict' not in _rule:
                         new_rule['strict'] = True
