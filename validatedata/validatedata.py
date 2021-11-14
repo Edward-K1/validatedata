@@ -1,15 +1,16 @@
 from collections import OrderedDict
 from functools import wraps
 from inspect import getfullargspec
+from unittest.signals import removeResult
 
 from .validator import Validator
 
-_BASIC_TYPES = ('bool', 'date', 'email', 'even', 'float', 'int', 'odd', 'str')
-_EXTENDED_TYPES = ('dict', 'list', 'regex', 'set', 'tuple')
-_NATIVE_TYPES = (bool, float, int, str, dict, list, set, tuple)
+BASIC_TYPES = ('bool', 'date', 'email', 'even', 'float', 'int', 'odd', 'str')
+EXTENDED_TYPES = ('dict', 'list', 'regex', 'set', 'tuple')
+NATIVE_TYPES = (bool, float, int, str, dict, list, set, tuple)
 
 
-def validate(rule, raise_exceptions=False, is_class=False):
+def validate(rule, raise_exceptions=False, is_class=False, **kwds):
     def decorator(func):
         @wraps(func)
         def wrapper(obj, *args, **kwargs):
@@ -49,7 +50,7 @@ def validate(rule, raise_exceptions=False, is_class=False):
                     ], kwargs.values()))
 
             result = validate_data(func_data, rule, raise_exceptions,
-                                   func_defaults)
+                                   func_defaults, **kwds)
 
             if result.ok:
                 return func(obj, *args, **kwargs)
@@ -61,26 +62,22 @@ def validate(rule, raise_exceptions=False, is_class=False):
     return decorator
 
 
-def validate_data(data, rule, raise_exceptions=False, defaults={}):
+def validate_data(data, rule, raise_exceptions=False, defaults={}, **kwds):
 
-    validator = Validator(_NATIVE_TYPES, _BASIC_TYPES, _EXTENDED_TYPES,
-                          raise_exceptions)
+    validator = Validator(NATIVE_TYPES, BASIC_TYPES, EXTENDED_TYPES,
+                          raise_exceptions, **kwds)
     expanded_rule = expand_rule(rule)
 
     if isinstance(expanded_rule, dict):
-        data = OrderedDict(data)
         dict_rules = []
-        for key in data:
-            key_rule = expanded_rule['keys'][key]
-            if key_rule.get('type') in {
-                        'bool', 'dict', 'list', 'set', 'str', 'tuple'
-                }:
-                    if 'strict' not in key_rule:
-                        key_rule['strict'] = True
+        ordered_data = OrderedDict()
+        for key in expanded_rule['keys']:
+            dict_rules.append(expanded_rule['keys'][key])
+            ordered_data[key] = data.get(key, '')
 
-            dict_rules.append(key_rule)
-            
+
         expanded_rule = dict_rules
+        data = ordered_data
 
     result = validator.validate_object(data, expanded_rule, defaults)
 
@@ -101,7 +98,7 @@ def expand_rule(rule):
         rule_dict = {}
         _type = rule.split(':')[0].strip() if ':' in rule else rule
 
-        if _type not in set(_BASIC_TYPES + _EXTENDED_TYPES):
+        if _type not in set(BASIC_TYPES + EXTENDED_TYPES):
             raise TypeError(f'{_type} is not a supported type')
 
         msg = rule.split(':msg:')[1] if ':msg:' in rule else ''
@@ -115,7 +112,7 @@ def expand_rule(rule):
         if to_range:
             rule_dict['range'] = (to_range[0], to_range[1])
 
-        if _type in {'int', 'float'}:
+        if _type in ('int', 'float'):
             rule_dict['strict'] = True if ':strict' in rule else False
 
         # prevent ast.literal_eval on object data if user hasn't requested for it
@@ -124,22 +121,25 @@ def expand_rule(rule):
 
         if _type == 'regex':
             if len(rule.split(':')) < 2:
-                raise ValueError('No regex string provided')
+                raise ValueError('No regular expression provided')
 
             rule_dict['expression'] = rule.split(':')[1]
 
         if len(rule.split(':')) >= 2:
             length = rule.split(':')[1]
-            if _type not in {'regex', 'float'} and length.isdigit():
+            if _type not in ('regex', 'float') and length.isdigit():
                 rule_dict['length'] = int(length)
 
         return rule_dict
 
     if isinstance(rule, str):
-        expanded_rules = expand_rule_string(rule)
+        expanded_rules.append(expand_rule_string(rule))
 
     elif isinstance(rule, dict):
-        expanded_rules = rule
+        if 'keys' not in rule:
+            expanded_rules.append(rule)
+        else:
+            expanded_rules = rule
 
     else:
         for _rule in rule:
@@ -147,13 +147,8 @@ def expand_rule(rule):
                 expanded_rules.append(expand_rule_string(_rule))
 
             elif isinstance(_rule, dict):
-                new_rule = _rule
-                if _rule.get('type') in {
-                        'bool', 'dict', 'list', 'set', 'str', 'tuple'
-                }:
-                    if 'strict' not in _rule:
-                        new_rule['strict'] = True
-                expanded_rules.append(new_rule)
+                
+                expanded_rules.append(_rule)
 
             else:
                 raise TypeError(

@@ -20,4 +20,5 @@ error_messages = {
     'not_even': 'value is not an even number',
     'not_odd': 'value is not an odd number',
     'unkown_exception': 'Unknown exception in %s: %s',
+    'missing_value': 'value is missing'
 }
