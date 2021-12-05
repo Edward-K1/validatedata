@@ -49,9 +49,7 @@ class Validator:
                     if value == defaults.get(key): continue
 
                 current_rules = rules[index]
-                # if current_rules.get('type') in {
-                #         'bool', 'dict', 'list', 'set', 'str', 'tuple'
-                # }:
+                
                 if current_rules.get('type') not in ('date', 'regex'):
                     if 'strict' not in current_rules:
                         current_rules['strict'] = True
@@ -77,17 +75,16 @@ class Validator:
                 self.validate_rule('', value, current_rules)
 
         elif isinstance(data, str):
-            if rules.get('type') not in ('date', 'regex'):
-                if 'strict' not in rules:
-                    rules['strict'] = True
+            self.group_errors = False
 
-            if self.group_errors:
-                self.errors.append([])
+            if rules[0].get('type') not in ('date', 'regex'):
+                if 'strict' not in rules[0]:
+                    rules[0]['strict'] = True
 
-            self.validate_rule('', data, rules)
+            self.validate_rule('', data, rules[0])
 
         else:
-            raise TypeError('the data parameter should be a list or tuple')
+            raise TypeError('the data parameter should be a string, list, or tuple')
 
         result['errors'] = self.errors
 
@@ -125,13 +122,13 @@ class Validator:
                             append_error()
 
                     else:
+                        rule_error_key = 'object_length_invalid'
 
                         if hasattr(value, '__len__'):
                             if len(value) != rule_value:
-                                append_error('object_length_invalid')
+                                append_error()
                         else:
-
-                            append_error('object_length_invalid')
+                            append_error()
 
                 elif rule_key == 'options':
                     rule_error_key = 'not_in_options'
@@ -161,12 +158,14 @@ class Validator:
                                 append_error()
 
                         elif _type == 'dict':
+                            rule_error_key = 'missing_required_keys'
                             if rule_value not in value:
-                                append_error('missing_required_keys')
+                                append_error()
 
                         else:
+                            rule_error_key = 'missing_required_values'
                             if rule_value not in set(value):
-                                append_error('missing_required_values')
+                                append_error()
 
                     else:
                         if isinstance(rule_value, (list, tuple)):
@@ -178,14 +177,16 @@ class Validator:
                                     append_error()
 
                             elif _type == 'dict':
+                                rule_error_key = 'missing_required_keys'
 
                                 if not all(val in set(value.keys())
                                            for val in rule_value):
-                                    append_error('missing_required_keys')
+                                    append_error()
                             else:
+                                rule_error_key = 'missing_required_values'
                                 if not all(val in set(value)
                                            for val in rule_value):
-                                    append_error('missing_required_values')
+                                    append_error()
 
                 elif rule_key == 'expression':
                     regex = None
@@ -237,11 +238,13 @@ class Validator:
                         raise ValueError('range object should have 2 values')
 
                     if _type == 'str':
+                        rule_error_key = 'string_not_in_range'
                         if not len(value) >= rule_value[0] and len(
                                 value) <= rule_value[1]:
-                            append_error('string_not_in_range')
+                            append_error()
 
                     elif _type == 'date':
+                        rule_error_key = 'date_not_in_range'
                         min_date = None
                         max_date = None
                         cast_date = value if isinstance(
@@ -261,14 +264,16 @@ class Validator:
 
                         if not (cast_date >= min_date
                                 and cast_date <= max_date):
-                            append_error('date_not_in_range')
+                            append_error()
 
                     elif _type in ('list', 'tuple'):
+                        rule_error_key = 'list_or_tuple_not_in_range'
                         if not len(value) >= rule_value[0] and len(
                                 value) <= rule_value[1]:
-                            append_error('list_or_tuple_not_in_range')
+                            append_error()
 
                     elif _type in ('int', 'float', 'even', 'odd'):
+                        rule_error_key = 'number_not_in_range'
                         min_value = float(
                             '-inf'
                         ) if rule_value[0] == 'any' else rule_value[0]
@@ -278,7 +283,7 @@ class Validator:
 
                         if not (cast_value >= min_value
                                 and cast_value <= max_value):
-                            append_error('number_not_in_range')
+                            append_error()
 
                     else:
                         raise_invalid_rule(_type, rule_key)
@@ -319,8 +324,8 @@ class Validator:
                     is_empty = True
 
                 else:
-                    if data_type in ('int', 'float', 'even'):
-                        if not int(data) == 0: is_empty = True
+                    # if data_type in ('int', 'float', 'even'):
+                    if not int(data) == 0: is_empty = True
 
             elif data_type == 'str' and str(data).strip() == '':
                 is_empty = True

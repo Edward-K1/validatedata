@@ -68,13 +68,12 @@ def validate_data(data, rule, raise_exceptions=False, defaults={}, **kwds):
                           raise_exceptions, **kwds)
     expanded_rule = expand_rule(rule)
 
-    if isinstance(expanded_rule, dict):
+    if isinstance(expanded_rule, (dict, OrderedDict)):
         dict_rules = []
         ordered_data = OrderedDict()
         for key in expanded_rule['keys']:
             dict_rules.append(expanded_rule['keys'][key])
             ordered_data[key] = data.get(key, '')
-
 
         expanded_rule = dict_rules
         data = ordered_data
@@ -87,9 +86,9 @@ def validate_data(data, rule, raise_exceptions=False, defaults={}, **kwds):
 def expand_rule(rule):
     expanded_rules = []
 
-    if not isinstance(rule, (str, tuple, dict)):
+    if not isinstance(rule, (str, tuple, list, dict)):
         raise TypeError(
-            'Validation rule(s) must be of type: str, tuple, or dict')
+            'Validation rule(s) must be of type: str, tuple, list, or dict')
 
     if len(str(rule)) < 3:
         raise ValueError(f'Invalid rule {rule}')
@@ -112,12 +111,6 @@ def expand_rule(rule):
         if to_range:
             rule_dict['range'] = (to_range[0], to_range[1])
 
-        if _type in ('int', 'float'):
-            rule_dict['strict'] = True if ':strict' in rule else False
-
-        # prevent ast.literal_eval on object data if user hasn't requested for it
-        if _type in {'bool', 'dict', 'list', 'set', 'str', 'tuple'}:
-            rule_dict['strict'] = True
 
         if _type == 'regex':
             if len(rule.split(':')) < 2:
@@ -125,7 +118,7 @@ def expand_rule(rule):
 
             rule_dict['expression'] = rule.split(':')[1]
 
-        if len(rule.split(':')) >= 2:
+        if len(rule.split(':')) >= 2 and ':to:' not in rule:
             length = rule.split(':')[1]
             if _type not in ('regex', 'float') and length.isdigit():
                 rule_dict['length'] = int(length)
@@ -135,7 +128,7 @@ def expand_rule(rule):
     if isinstance(rule, str):
         expanded_rules.append(expand_rule_string(rule))
 
-    elif isinstance(rule, dict):
+    elif isinstance(rule, (dict, OrderedDict)):
         if 'keys' not in rule:
             expanded_rules.append(rule)
         else:
