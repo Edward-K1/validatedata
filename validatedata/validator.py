@@ -72,6 +72,11 @@ class Validator:
                     if 'strict' not in current_rules:
                         current_rules['strict'] = True
 
+                if not self.is_type(current_rules.get('type'), value,
+                                    current_rules, True, '', '',
+                                    current_rules.get('strict', False)):
+                    break
+
                 self.validate_rule('', value, current_rules)
 
         elif isinstance(data, str):
@@ -307,7 +312,6 @@ class Validator:
                 strict=False):
 
         status = False
-        is_empty = False
 
         def append_type_error(error_key='type_invalid'):
             self.format_error(error_key, (data_type, type(data).__qualname__),
@@ -319,20 +323,10 @@ class Validator:
 
         try:
 
-            if not data:
-                if data_type not in ('int', 'float', 'even'):
-                    is_empty = True
-
-                else:
-                    # if data_type in ('int', 'float', 'even'):
-                    if not int(data) == 0: is_empty = True
-
-            elif data_type == 'str' and str(data).strip() == '':
-                is_empty = True
-
-            if is_empty:
+            if str(data).strip() == '':
                 append_type_error('missing_value')
-                return status
+                return False
+            
 
             if data_type in set(self.native_types.keys()):
                 if strict == False:
@@ -395,7 +389,7 @@ class Validator:
                      raised_exception_type=ValueError):
 
         formatted_message = ''
-        raw_error = errm.get(f'field_{error_key}', '') or errm[error_key]
+        raw_error = errm.get(f'field_{error_key}', '') if field else errm[error_key]
         custom_message = rules.get(f'{rule_key}-message', '') or rules.get(
             'message', '')
 

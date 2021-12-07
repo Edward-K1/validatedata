@@ -5,7 +5,7 @@ A python data-validation package
 
 ## Installation
 
-```pip install validatedata ```
+``` pip install validatedata ```
 
 
 ## Usage
@@ -91,7 +91,7 @@ def sum(a, b):
 - rule - same as decorator
 - raise_exceptions - same as decorator
 - is_class - same as decorator
-- kwds - same as
+- kwds - same as decorator
 
 > When the `data` parameter is a dict, `rule` should also be a dict in this format
 ```
@@ -152,8 +152,8 @@ else:
 - expression - string - ensures data matches a given regular expression
 - type - string - specifies type of data expected. Should always be included
 - range - tuple - specifies permitted range or values. Used with numbers and dates
-- startswith - string - yes
-- endswith - string - yes
+- startswith - object - string, int, et cetera that a type starts with
+- endswith - object - string, int, et cetera that a type ends with
 
 &nbsp;
 
@@ -184,12 +184,7 @@ class User:
 
 
 user = User()
-user.signup('helterskelter', 'paddlewaddle', 'Arosebyanyname?1')
-
-
-
-
-
+user.signup('helterskelter', 'paddlewaddle', 'Arosebyanyname?1'
 
 ```
 
@@ -215,10 +210,11 @@ user.signup('helterskelter', 'paddlewaddle', 'Arosebyanyname?1')
 {..., 'excludes': ('Bill', ... )}
 ```
 
-
 - Some functionality isn't listed because it's still undergoing tests. The readme will be updated in due course.
 
 - The current version does not support nested data
+
+
 
 ## Licence
 MIT

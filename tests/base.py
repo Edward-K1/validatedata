@@ -139,8 +139,8 @@ class BaseTest(unittest.TestCase):
                     'contains': (5, 6, 9),
                     'excludes': (8, ),
                     'options': (5, 6, 7, 9, 10),
-                    'startswith': (5, 6),
-                    'endswith': (9, 10)
+                    'startswith': 5,
+                    'endswith': 10
                 }.items())
         ]
 
@@ -167,8 +167,8 @@ class BaseTest(unittest.TestCase):
                     'contains': (5, 6, 9),
                     'excludes': (8, ),
                     'options': (5, 6, 7, 9, 10),
-                    'startswith': (5, 6),
-                    'endswith': (9, 10)
+                    'startswith': 5,
+                    'endswith': 10
                 }.items())
         ]
 
@@ -235,38 +235,12 @@ class BaseTest(unittest.TestCase):
             },
         ]
 
-        self.load_type_data()
-
-    def tearDown(self):
-        pass
-
-    def load_type_data(self):
-        self.int = 99
-        self.odd = 777
-        self.even = 700
-        self.float = 2.55
-        self.regex = r'\d{2,}'
-        self.bool_true = True
-        self.empty_str = ''
-        self.min_date_str = '01-Jan-1970'
-        self.max_date_str = '20 November 2021'
-        self.min_date = parse_date(self.min_date_str)
-        self.max_date = parse_date(self.max_date_str)
-        self.valid_email = 'iamvalid@example.com'
-        self.invalid_email = 'callmepwetty.com'
-
-        self.sample_str = 'i am a string'
-        self.set = {6, 7, 8, 'A', 'B', 'C'}
-        self.list = [1, 4, 8, 'counting', 'sheep']
-        self.tuple = (21, 'say', 'i', 'do', 'say', 'it')
-        self.dict = {
-            'name': 'joker',
-            'age': 54,
-            'email': 'joketown@example.com'
-        }
 
     def append_rule(self, base_rule: dict, new_rule: dict):
         return base_rule.update(new_rule)
 
     def get_type_dict(self, type_str):
         return {'type': type_str}
+
+    def tearDown(self):
+        pass

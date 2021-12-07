@@ -8,11 +8,12 @@ class TestTypes(BaseTest):
     def test_bool(self):
         result1 = validate_data([True], self.all_bool_rules[0])
         result2 = validate_data([False], self.all_bool_rules[0])
-        result3 = validate_data('nope', self.all_bool_rules[0])
+        result3 = validate_data(['nope'], self.all_bool_rules[0])
 
         self.assertEqual(result1.ok, True)
         self.assertEqual(result2.ok, True)
         self.assertEqual(result3.ok, False)
+        
 
     def test_date(self):
         result1 = validate_data('23-Oct-2000', self.all_date_rules[0])
@@ -68,7 +69,7 @@ class TestTypes(BaseTest):
         result1 = validate_data([6.5], self.all_float_rules[0])
         result2 = validate_data([6.5], self.all_float_rules[1])
         result3 = validate_data([400.8], self.all_float_rules[1])
-        result4 = validate_data(['40.6'], self.all_float_rules[1])
+        result4 = validate_data(['40.6'], self.all_float_rules[2])
 
         self.assertEqual(result1.ok, True)
         self.assertEqual(result2.ok, True)
@@ -108,10 +109,9 @@ class TestTypes(BaseTest):
         self.assertEqual(result1.ok, True)
 
     def test_list(self):
-        result1 = validate_data([[5, 6, 9, 10]], self.all_tuple_rules[0])
-        result2 = validate_data([[5, 6, 9, 10]], self.all_tuple_rules[1])
+        result1 = validate_data([[5, 6, 9, 10]], self.all_list_rules[0])
+        result2 = validate_data([[5, 6, 9, 10]], self.all_list_rules[1])
 
-        print(result2)
         self.assertEqual(result1.ok, True)
         self.assertEqual(result2.ok, True)
 
@@ -126,7 +126,6 @@ class TestTypes(BaseTest):
         result3 = validate_data([{5, 6, 9}], self.all_set_rules[1])
         result4 = validate_data([{1, 1, 2, 8}], self.all_set_rules[1])
 
-        print(result2, result3)
         self.assertEqual(result1.ok, True)
         self.assertEqual(result2.ok, False)
         self.assertEqual(result3.ok, True)
@@ -136,6 +135,5 @@ class TestTypes(BaseTest):
         result1 = validate_data([(5, 6, 9, 10)], self.all_tuple_rules[0])
         result2 = validate_data([(5, 6, 9, 10)], self.all_tuple_rules[1])
 
-        print(result2)
         self.assertEqual(result1.ok, True)
         self.assertEqual(result2.ok, True)
