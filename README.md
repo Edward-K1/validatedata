@@ -1,11 +1,13 @@
 # Validatedata
-
+![example workflow](https://github.com/Edward-K1/validatedata/actions/workflows/release.yml/badge.svg)
 An easier way to validate data in python
 
 
 ## Installation
 
-``` pip install validatedata ```
+```shell
+pip install validatedata
+```
 
 
 > Note: This is an alpha release. Please test all required functionality
@@ -54,7 +56,7 @@ There are two ways to validate data:
 
 **1. Using the decorator**
 
-```
+```python
 from validatedata import validate
 
 rules = ['int', 'int']
@@ -72,13 +74,13 @@ def sum(a, b):
 * is_class - *bool* - required for class methods that don't have the `self` parameter
 * kwds - *dict* - takes configuration parameters that aren't explicitly catered for, e.g `log_errors` and `group_errors`
 
-> Set `log_errors` to True if you wish to log unhandled errors occuring in the background i.e `@validate(rules, ..., kwds={'log_errors': True})`
+Set `log_errors` to True if you wish to log unhandled errors occuring in the background i.e `@validate(rules, ..., kwds={'log_errors': True})`
 
-> Set `group_errors` to False if you wish to disable grouping of errors
+Set `group_errors` to False if you wish to disable grouping of errors
 
 When the data does not match the rules, a dictionary is returned in the following format:
 
-```
+```python
 {
     'errors': [[group1], [group2], ...]
 }
@@ -93,7 +95,7 @@ or
 
 **2. Using the validate_data function**
 
-```
+```python
 from validatedata import validate_data
 
 rules = [{
@@ -118,7 +120,7 @@ def sum(a, b):
 ```
 
 
-> Custom messages can be set by adding a key that matches the format, `{rule}-message` e.g range-message, length-message, et cetera. They are recommeded since the present defaults might be too generic in some circumstances
+Custom messages can be set by adding a key that matches the format, `{rule}-message` e.g range-message, length-message, et cetera. They are recommeded since the present defaults might be too generic in some circumstances
 
 
 **Parameters**
@@ -130,23 +132,20 @@ def sum(a, b):
 - kwds - same as decorator
 
 > When the `data` parameter is a dict, `rule` should also be a dict in this format
-```
+```python
 {'keys': OrderedDict({
     'key1': {'type':'<type>', ...},
     'key2': {'type': 'int', 'range': (5, 1000)}
 })}
 ```
-> For Python versions `>= 3.7` you can replace `OrderedDict` with a standard dict since they are said to maintain insertion order
+For Python versions `>= 3.7` you can replace `OrderedDict` with a standard dict since they are said to maintain insertion order
 
 &nbsp;
 
 A SimpleNamespace object with the attributes `ok` and `errors` is returned. It can be accessed like so:
 
-```
+```python
 result = validate_data(...)
-
-# dir(result) 
-# namespace(ok=False, errors=[[group1], [group2], ...])
 
 if result.ok:
     pass # do x
@@ -161,7 +160,7 @@ else:
 
 
 ### Examples
-```
+```python
 
 signup_rules = [{
     'type': 'str',
@@ -191,7 +190,16 @@ rules = ['str:20', 'int:10', 'list:5']
 
 rules = [{'type':'str', 'length':20}, {'type':'int', 'length':10}, {'type':'list', 'length': 5}]
 
-rules = [{'type':'date', 'range': ('01-Jan-2021', 'any'), 'range-message':'the lowest date is 1st Jan 2021}]
+rules = [{'type':'date', 'range': ('01-Jan-2021', 'any'), 'range-message':'the lowest date is 1st Jan 2021'}]
+
+
+
+class User:
+
+    @classmethod
+    @validate(rule=['str', 'str'], is_class=True)
+    def format_name(cls, firstname, lastname):
+        return f'{firstname} {lastname}'
 
 ```
 
@@ -200,7 +208,7 @@ rules = [{'type':'date', 'range': ('01-Jan-2021', 'any'), 'range-message':'the l
 
 - The functionality of a rule depends on the type it's working upon, e.g
 
-```
+```python
 {'type':'int', 'range':(2, 100)} # int >= 2 and <= 100
 
 {'type': 'str', 'range':(2, 100)} # string of variable length: len(s) >= 2 and len(s) <= 100
@@ -210,17 +218,16 @@ rules = [{'type':'date', 'range': ('01-Jan-2021', 'any'), 'range-message':'the l
 
 - The equivalence rules `equal to` and `not equal to` aren't included but their effect can be achieved using `options` and `excludes`
 
-```
+```python
 {..., 'options': (200, )}
 
 {..., 'excludes': ('Bill', ... )}
 ```
 
-- Some functionality isn't listed because it's still undergoing tests. The readme will be updated in due course.
 
 - The current version does not support nested data
 
 
 
-## Licence
+## License
 MIT
