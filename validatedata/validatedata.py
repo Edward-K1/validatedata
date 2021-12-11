@@ -1,7 +1,6 @@
 from collections import OrderedDict
 from functools import wraps
 from inspect import getfullargspec
-from unittest.signals import removeResult
 
 from .validator import Validator
 

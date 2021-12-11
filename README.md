@@ -1,6 +1,6 @@
 # Validatedata
 
-A python data-validation package
+An easier way to validate data in python
 
 
 ## Installation
@@ -8,10 +8,46 @@ A python data-validation package
 ``` pip install validatedata ```
 
 
+> Note: This is an alpha release. Please test all required functionality
+
+
+### Types
+
+- bool
+- date
+- email
+- even
+- float
+- int
+- odd
+- str
+- dict
+- list
+- regex
+- set
+- tuple
+
+&nbsp;
+
+
+
+### Rules
+- length - integer - expected length of a string, int, or object
+- contains - string or tuple of values expected in an object
+- excludes - string or tuple of values not permitted
+- options - tuple - a tuple of permitted values
+- strict - boolean indicating whether data should be type cast or not
+- expression - string - ensures data matches a given regular expression
+- type - string - specifies type of data expected. Should always be included
+- range - tuple - specifies permitted range or values. Used with numbers and dates
+- startswith - object - string, int, et cetera that a type starts with
+- endswith - object - string, int, et cetera that a type ends with
+
+&nbsp;
+
+
 ## Usage
 
-
-> Note: This is an alpha release. Please test all required functionality
 
 
 There are two ways to validate data:
@@ -70,7 +106,7 @@ rules = [{
 }]
 
 def sum(a, b):
-    total = None
+    total = 0
 
     result = validate_data(data=[a, b], rule=rules)
 
@@ -123,68 +159,39 @@ else:
 
 &nbsp;
 
-### Types
-
-- bool
-- date
-- email
-- even
-- float
-- int
-- odd
-- str
-- dict
-- list
-- regex
-- set
-- tuple
-
-&nbsp;
-
-
-
-### Rules
-- length - integer - expected length of a string, int, or object
-- contains - string or tuple of values expected in an object
-- excludes - string or tuple of values not permitted
-- options - tuple - a tuple of permitted values
-- strict - boolean indicating whether data should be type cast or not
-- expression - string - ensures data matches a given regular expression
-- type - string - specifies type of data expected. Should always be included
-- range - tuple - specifies permitted range or values. Used with numbers and dates
-- startswith - object - string, int, et cetera that a type starts with
-- endswith - object - string, int, et cetera that a type ends with
-
-&nbsp;
-
-> 
-
-
 
 ### Examples
 ```
 
 signup_rules = [{
     'type': 'str',
-    'expression': r'^\w[\w\d_-]{2,31}$',
+    'expression': r'^[^\d\W_]+[\w\d_-]{2,31}$',
     'expression-message': 'invalid username'
 }, 
-'email',
+'email:msg:invalid email',
  {
     'type':'str',
     'expression':r'(?=\S*[a-z])(?=\S*[A-Z])(?=\S*\d)(?=\S*[^\w\s])\S{8,}$',
-    'message':'password must contain a number, an uppercase letter, and should be atleast 8 characters long without spaces'
+    'message':'password must contain a number, an uppercase letter, and should be at least 8 characters long without spaces'
 }]
 
 
 class User:
     @validate(signup_rules, raise_exceptions=True)
     def signup(self, username, email, password):
-        print("Yep, it's real...")
+        return "Account Created"
 
 
 user = User()
-user.signup('helterskelter', 'paddlewaddle', 'Arosebyanyname?1'
+user.signup('helterskelter', 'paddle', 'Arosebyanyname?1')
+
+
+
+rules = ['str:20', 'int:10', 'list:5']
+
+rules = [{'type':'str', 'length':20}, {'type':'int', 'length':10}, {'type':'list', 'length': 5}]
+
+rules = [{'type':'date', 'range': ('01-Jan-2021', 'any'), 'range-message':'the lowest date is 1st Jan 2021}]
 
 ```
 
@@ -198,7 +205,6 @@ user.signup('helterskelter', 'paddlewaddle', 'Arosebyanyname?1'
 
 {'type': 'str', 'range':(2, 100)} # string of variable length: len(s) >= 2 and len(s) <= 100
 
-{'type':'date', 'range': ('28-June-2000', 'any')} # date >= 28 June 2000 00:00
 
 ```
 

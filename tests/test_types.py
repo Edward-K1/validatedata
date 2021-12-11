@@ -91,8 +91,10 @@ class TestTypes(BaseTest):
 
     def test_odd(self):
         result1 = validate_data([15], self.all_odd_rules[0])
+        result2 = validate_data([20], self.all_odd_rules[0])
 
         self.assertEqual(result1.ok, True)
+        self.assertEqual(result2.ok, False)
 
     def test_str(self):
         result1 = validate_data(['validate'], self.all_str_rules[0])
@@ -103,10 +105,17 @@ class TestTypes(BaseTest):
 
     def test_dict(self):
         dict1 = {'name': 'james', 'age': 22, 'city': 'kampala'}
+        dict2 = {'name': 'james', 'age': 22}
 
         result1 = validate_data([dict1], self.all_dict_rules[0])
+        result2 = validate_data([dict1], self.all_dict_rules[1])
+        result3 = validate_data([dict2], self.all_dict_rules[1])
+        result4 = validate_data([{'he','llo'}], self.all_dict_rules[1])
 
         self.assertEqual(result1.ok, True)
+        self.assertEqual(result2.ok, True)
+        self.assertEqual(result3.ok, False)
+        self.assertEqual(result4.ok, False)
 
     def test_list(self):
         result1 = validate_data([[5, 6, 9, 10]], self.all_list_rules[0])
