@@ -9,10 +9,21 @@ EXTENDED_TYPES = ('dict', 'list', 'regex', 'set', 'tuple')
 NATIVE_TYPES = (bool, float, int, str, dict, list, set, tuple)
 
 
+class ValidationNull:
+    def __str__(self):
+        return 'ValidationNull'
+
+    def __repr__(self):
+        return 'ValidationNull'
+
+
+VNULL = ValidationNull()
+
+
 def validate(rule, raise_exceptions=False, is_class=False, **kwds):
     def decorator(func):
         @wraps(func)
-        def wrapper(obj, *args, **kwargs):
+        def wrapper(obj=VNULL, *args, **kwargs):
             func_data = OrderedDict()
             func_defaults = OrderedDict()
             func_defn = getfullargspec(func)
@@ -52,7 +63,11 @@ def validate(rule, raise_exceptions=False, is_class=False, **kwds):
                                    func_defaults, **kwds)
 
             if result.ok:
-                return func(obj, *args, **kwargs)
+                if isinstance(obj, ValidationNull):
+                    return func(*args, **kwargs)
+                else:
+
+                    return func(obj, *args, **kwargs)
             else:
                 return {'errors': result.errors}
 
@@ -110,7 +125,6 @@ def expand_rule(rule):
         if to_range:
             rule_dict['range'] = (to_range[0], to_range[1])
 
-
         if _type == 'regex':
             if len(rule.split(':')) < 2:
                 raise ValueError('No regular expression provided')
@@ -139,7 +153,7 @@ def expand_rule(rule):
                 expanded_rules.append(expand_rule_string(_rule))
 
             elif isinstance(_rule, dict):
-                
+
                 expanded_rules.append(_rule)
 
             else:
