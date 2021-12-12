@@ -1,5 +1,7 @@
 # Validatedata
-![example workflow](https://github.com/Edward-K1/validatedata/actions/workflows/release.yml/badge.svg)
+![build workflow](https://github.com/Edward-K1/validatedata/actions/workflows/release.yml/badge.svg)
+&nbsp;
+
 An easier way to validate data in python
 
 
