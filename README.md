@@ -7,7 +7,7 @@ An easier way to validate data in python
 
 ## Installation
 
-```shell
+```
 pip install validatedata
 ```
 
@@ -30,6 +30,7 @@ pip install validatedata
 - regex
 - set
 - tuple
+- object
 
 &nbsp;
 
@@ -122,7 +123,7 @@ def sum(a, b):
 ```
 
 
-Custom messages can be set by adding a key that matches the format, `{rule}-message` e.g range-message, length-message, et cetera. They are recommeded since the present defaults might be too generic in some circumstances
+Custom messages can be set by adding a key that matches the format, `{rule}-message` e.g range-message, length-message, et cetera. They are recommended since the present defaults might be too generic in some circumstances
 
 
 **Parameters**
@@ -133,7 +134,8 @@ Custom messages can be set by adding a key that matches the format, `{rule}-mess
 - is_class - same as decorator
 - kwds - same as decorator
 
-> When the `data` parameter is a dict, `rule` should also be a dict in this format
+When the `data` parameter is a dict, `rule` should also be a dict in this format:
+
 ```python
 {'keys': OrderedDict({
     'key1': {'type':'<type>', ...},
@@ -144,7 +146,7 @@ For Python versions `>= 3.7` you can replace `OrderedDict` with a standard dict 
 
 &nbsp;
 
-A SimpleNamespace object with the attributes `ok` and `errors` is returned. It can be accessed like so:
+A SimpleNamespace object with the attributes **ok** and **errors** is returned. It can be accessed like so:
 
 ```python
 result = validate_data(...)
@@ -218,7 +220,7 @@ class User:
 
 ```
 
-- The equivalence rules `equal to` and `not equal to` aren't included but their effect can be achieved using `options` and `excludes`
+- The equivalence rules **equal to** and **not equal to** aren't included but their effect can be achieved using **options** and **excludes**
 
 ```python
 {..., 'options': (200, )}
@@ -226,6 +228,20 @@ class User:
 {..., 'excludes': ('Bill', ... )}
 ```
 
+- **Object** caters to custom types
+```python
+
+class Person:
+    pass
+
+rules = [{'type':'object', 'object':Person, 'message':'Person object expected'}]
+
+result = validate_data(data=[12], rule=rules)
+
+# person = Person()
+# result = validate_data(data=[person], rule=rules)
+
+```
 
 - The current version does not support nested data
 

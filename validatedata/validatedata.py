@@ -5,25 +5,25 @@ from inspect import getfullargspec
 from .validator import Validator
 
 BASIC_TYPES = ('bool', 'date', 'email', 'even', 'float', 'int', 'odd', 'str')
-EXTENDED_TYPES = ('dict', 'list', 'regex', 'set', 'tuple')
+EXTENDED_TYPES = ('dict', 'list', 'object', 'regex', 'set', 'tuple')
 NATIVE_TYPES = (bool, float, int, str, dict, list, set, tuple)
 
 
-class ValidationNull:
+class EmptyObject:
     def __str__(self):
-        return 'ValidationNull'
+        return 'EmptyObject'
 
     def __repr__(self):
-        return 'ValidationNull'
+        return 'EmptyObject'
 
 
-VNULL = ValidationNull()
+EMPTY = EmptyObject()
 
 
 def validate(rule, raise_exceptions=False, is_class=False, **kwds):
     def decorator(func):
         @wraps(func)
-        def wrapper(obj=VNULL, *args, **kwargs):
+        def wrapper(obj=EMPTY, *args, **kwargs):
             func_data = OrderedDict()
             func_defaults = OrderedDict()
             func_defn = getfullargspec(func)
@@ -63,7 +63,7 @@ def validate(rule, raise_exceptions=False, is_class=False, **kwds):
                                    func_defaults, **kwds)
 
             if result.ok:
-                if isinstance(obj, ValidationNull):
+                if isinstance(obj, EmptyObject):
                     return func(*args, **kwargs)
                 else:
 

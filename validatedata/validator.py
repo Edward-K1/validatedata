@@ -9,9 +9,9 @@ from types import SimpleNamespace
 
 from .messages import error_messages as errm
 
-_ALL_RULES = {
+ALL_RULES = {
     'length', 'contains', 'excludes', 'options', 'strict', 'expression',
-    'type', 'range', 'startswith', 'endswith'
+    'type', 'range', 'startswith', 'endswith', 'object'
 }
 
 
@@ -325,7 +325,7 @@ class Validator:
 
             if str(data).strip() == '':
                 append_type_error('missing_value')
-                return False
+                return status
             
 
             if data_type in set(self.native_types.keys()):
@@ -369,6 +369,10 @@ class Validator:
                 if not (self.is_type('int', data, rules, strict=strict)
                         and int(data) % 2 == 1):
                     append_type_error('not_odd')
+
+            elif data_type == 'object':
+                if not isinstance(data, rules['object']):
+                    append_type_error('invalid_object')
 
             status = True
 

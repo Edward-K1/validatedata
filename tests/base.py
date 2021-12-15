@@ -20,6 +20,7 @@ class BaseTest(unittest.TestCase):
         self.regex_rule = self.get_type_dict('regex')
         self.set_rule = self.get_type_dict('set')
         self.tuple_rule = self.get_type_dict('tuple')
+        self.object_rule = self.get_type_dict('object')
 
         self.all_bool_rules = [self.bool_rule]
 
@@ -233,6 +234,15 @@ class BaseTest(unittest.TestCase):
                 'type': 'str',
                 'range': (2, 50)
             },
+        ]
+
+        class Person:
+            pass
+
+
+        self.person_class = Person
+        self.all_object_rules = [
+            dict(self.object_rule.items() | {'object': Person}.items() )
         ]
 
 

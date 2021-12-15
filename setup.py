@@ -5,10 +5,10 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="validatedata",
-    version="0.0.1.4",
+    version="0.0.1.5",
     author="Edward Kigozi",
     author_email='edwardinbytes@gmail.com',
-    description="Validate data in python",
+    description="An easier way to validate data in python",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/Edward-K1/validatedata",

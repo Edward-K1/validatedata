@@ -1,4 +1,3 @@
-from os import truncate
 from validatedata.validatedata import validate_data
 from validatedata.messages import error_messages
 from .base import BaseTest
@@ -146,3 +145,10 @@ class TestTypes(BaseTest):
 
         self.assertEqual(result1.ok, True)
         self.assertEqual(result2.ok, True)
+
+    def test_object(self):
+
+        person = self.person_class()
+        result1 = validate_data([person], self.all_object_rules[0])
+    
+        self.assertEqual(result1.ok, True)
