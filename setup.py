@@ -1,11 +1,13 @@
 import setuptools
 
+from validatedata import __version__
+
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
     name="validatedata",
-    version="0.0.1.5",
+    version=__version__,
     author="Edward Kigozi",
     author_email='edwardinbytes@gmail.com',
     description="An easier way to validate data in python",

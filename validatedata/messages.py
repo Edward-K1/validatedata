@@ -21,5 +21,6 @@ error_messages = {
     'not_odd': 'value is not an odd number',
     'unkown_exception': 'Unknown exception in %s: %s',
     'missing_value': 'value is missing',
-    'invalid_object': 'object does not match expected type'
+    'invalid_object': 'object does not match expected type',
+    'no_error_message': 'Please set an error message',
 }

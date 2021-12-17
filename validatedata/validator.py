@@ -393,7 +393,8 @@ class Validator:
                      raised_exception_type=ValueError):
 
         formatted_message = ''
-        raw_error = errm.get(f'field_{error_key}', '') if field else errm[error_key]
+        raw_error = errm.get(f'field_{error_key}', '') if field else ''
+        raw_error = raw_error or errm[error_key] or errm['no_error_message']
         custom_message = rules.get(f'{rule_key}-message', '') or rules.get(
             'message', '')
 
@@ -403,6 +404,7 @@ class Validator:
             formatted_message = custom_message or raw_error % error_fields
         else:
             formatted_message = custom_message or raw_error
+
 
         if append_errors:
             if self.group_errors:
