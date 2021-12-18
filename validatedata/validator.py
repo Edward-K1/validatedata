@@ -323,11 +323,6 @@ class Validator:
 
         try:
 
-            if str(data).strip() == '':
-                append_type_error('missing_value')
-                return status
-            
-
             if data_type in set(self.native_types.keys()):
                 if strict == False:
                     try:

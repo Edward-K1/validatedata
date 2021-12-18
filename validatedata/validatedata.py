@@ -31,9 +31,9 @@ def validate(rule, raise_exceptions=False, is_class=False, **kwds):
                                   or func_defn.args[0] == 'self') else False
             clean_params = func_defn.args[1:] if obj_is_cls else func_defn.args
 
-            # initialize keys with empty strings
+            # initialize keys with empty objects
             func_data.update(
-                zip(clean_params, ['' for x in range(len(clean_params))]))
+                zip(clean_params, [EMPTY for x in range(len(clean_params))]))
 
             # assign default values to keys that had them
             if func_defn.defaults:
