@@ -1,5 +1,6 @@
 # Validatedata
 ![build workflow](https://github.com/Edward-K1/validatedata/actions/workflows/release.yml/badge.svg)
+[![PyPI version](https://badge.fury.io/py/validatedata.svg)](https://badge.fury.io/py/validatedata)
 &nbsp;
 
 An easier way to validate data in python

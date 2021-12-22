@@ -87,7 +87,7 @@ def validate_data(data, rule, raise_exceptions=False, defaults={}, **kwds):
         ordered_data = OrderedDict()
         for key in expanded_rule['keys']:
             dict_rules.append(expanded_rule['keys'][key])
-            ordered_data[key] = data.get(key, '')
+            ordered_data[key] = data.get(key, EMPTY)
 
         expanded_rule = dict_rules
         data = ordered_data
