@@ -36,6 +36,19 @@ class Validator:
 
     def validate_object(self, data, rules, defaults):
         result = {'ok': False}
+
+        def add_strict_rule(_rules):
+            new_rules = _rules
+            if _rules.get('type') not in ('date', 'regex'):
+                if 'strict' not in _rules:
+                    new_rules['strict'] = True
+            return new_rules
+
+        def value_is_of_type(current_rules, key, value):
+            cr = current_rules
+            return self.is_type(cr.get('type'), value, cr, True, '', key,
+                                cr.get('strict', False))
+
         if isinstance(data, OrderedDict):
             if defaults:
                 self.keys_with_defaults = set(defaults.keys())
@@ -48,15 +61,9 @@ class Validator:
                     # skip default values
                     if value == defaults.get(key): continue
 
-                current_rules = rules[index]
-                
-                if current_rules.get('type') not in ('date', 'regex'):
-                    if 'strict' not in current_rules:
-                        current_rules['strict'] = True
+                current_rules = add_strict_rule(rules[index])
 
-                if not self.is_type(current_rules.get('type'), value,
-                                    current_rules, True, '', key,
-                                    current_rules.get('strict', False)):
+                if not value_is_of_type(current_rules, key, value):
                     break
 
                 self.validate_rule(key, value, current_rules)
@@ -66,15 +73,9 @@ class Validator:
                 if self.group_errors:
                     self.errors.append([])
 
-                current_rules = rules[count]
+                current_rules = add_strict_rule(rules[count])
 
-                if current_rules.get('type') not in ('date', 'regex'):
-                    if 'strict' not in current_rules:
-                        current_rules['strict'] = True
-
-                if not self.is_type(current_rules.get('type'), value,
-                                    current_rules, True, '', '',
-                                    current_rules.get('strict', False)):
+                if not value_is_of_type(current_rules, '', value):
                     break
 
                 self.validate_rule('', value, current_rules)
@@ -82,14 +83,13 @@ class Validator:
         elif isinstance(data, str):
             self.group_errors = False
 
-            if rules[0].get('type') not in ('date', 'regex'):
-                if 'strict' not in rules[0]:
-                    rules[0]['strict'] = True
+            current_rules = add_strict_rule(rules[0])
 
-            self.validate_rule('', data, rules[0])
+            self.validate_rule('', data, current_rules)
 
         else:
-            raise TypeError('the data parameter should be a string, list, or tuple')
+            raise TypeError(
+                'the data parameter should be a string, list, or tuple')
 
         result['errors'] = self.errors
 
@@ -103,8 +103,6 @@ class Validator:
         _type = rules['type']
         rule_error_key = 'type_invalid'
         known_exception = False
-
-        if 'message' not in rules: rules['message'] = ''
 
         def append_error(error_key=''):
             error_key = error_key or rule_error_key
@@ -326,8 +324,9 @@ class Validator:
             if data_type in set(self.native_types.keys()):
                 if strict == False:
                     try:
-                        if not isinstance(literal_eval(str(data)),
-                                          self.native_types.get(data_type)):
+                        coerced_type = literal_eval(str(data))
+                        expected_type = self.native_types.get(data_type)
+                        if not isinstance(coerced_type, expected_type):
                             append_type_error()
 
                     except (TypeError, ValueError):
@@ -343,17 +342,16 @@ class Validator:
                         append_type_error('invalid_date')
 
             elif data_type == 'email':
-                try:
-                    email_re = re.compile(
-                        """^(([^<>()[\]\\.,;:\s@\"]+(\.[^<>()[\]\\.,;:\s@\"]+)*)
-                    |(\".+\"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])
-                    |(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$""", re.VERBOSE)
+               
+                email_re = re.compile(
+                    """^(([^<>()[\]\\.,;:\s@\"]+(\.[^<>()[\]\\.,;:\s@\"]+)*)
+                |(\".+\"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])
+                |(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$""", re.VERBOSE)
 
-                    if email_re.match(data) == None:
-                        append_type_error('invalid_email')
-
-                except Exception:
+                if email_re.match(str(data)) == None:
                     append_type_error('invalid_email')
+
+               
 
             elif data_type == 'even':
                 if not (self.is_type('int', data, rules, strict=strict)
@@ -400,14 +398,13 @@ class Validator:
         else:
             formatted_message = custom_message or raw_error
 
-
         if append_errors:
             if self.group_errors:
                 self.errors[-1].append(formatted_message)
             else:
                 self.errors.append(formatted_message)
 
-        if self.raise_exceptions and raised_exception_type is not None:
+        if self.raise_exceptions:
             raise raised_exception_type(formatted_message)
 
         return formatted_message
