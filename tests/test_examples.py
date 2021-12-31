@@ -1,4 +1,5 @@
 from validatedata.validatedata import validate, validate_data
+from validatedata.validator import ValidationError
 from .base import BaseTest
 
 
@@ -26,7 +27,7 @@ class TestExamples(BaseTest):
         status = user.signup('hello', 'p@j.com', 'dlllj89@jlH')
         self.assertEqual(status, "Account Created")
         
-        with self.assertRaises(TypeError) as ex:
+        with self.assertRaises(ValidationError) as ex:
             user.signup('helterskelter', 'paddle', 'Arosebyanyname?1')
             self.assertEqual('invalid email', str(ex))
 

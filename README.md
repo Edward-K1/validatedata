@@ -1,5 +1,5 @@
 # Validatedata
-![build workflow](https://github.com/Edward-K1/validatedata/actions/workflows/release.yml/badge.svg)
+![build workflow](https://github.com/Edward-K1/validatedata/actions/workflows/test.yml/badge.svg)
 [![PyPI version](https://badge.fury.io/py/validatedata.svg)](https://badge.fury.io/py/validatedata)
 &nbsp;
 
@@ -12,8 +12,6 @@ An easier way to validate data in python
 pip install validatedata
 ```
 
-
-> Note: This is an alpha release. Please test all required functionality
 
 
 ### Types

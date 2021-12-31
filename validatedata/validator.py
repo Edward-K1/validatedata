@@ -6,13 +6,37 @@ from collections import OrderedDict
 from datetime import datetime
 from dateutil.parser import parse as parse_date
 from types import SimpleNamespace
+from enum import Enum
 
 from .messages import error_messages as errm
 
-ALL_RULES = {
-    'length', 'contains', 'excludes', 'options', 'strict', 'expression',
-    'type', 'range', 'startswith', 'endswith', 'object'
-}
+
+class ErrorKeys(str, Enum):
+    DATE_NOT_IN_RANGE = 'date_not_in_range'
+    DOES_NOT_ENDWITH = 'does_not_endwith'
+    DOES_NOT_MATCH_REGEX = 'does_not_match_regex'
+    DOES_NOT_STARTWITH = 'does_not_startwith'
+    INVALID_DATE = 'invalid_date'
+    INVALID_EMAIL = 'invalid_email'
+    INVALID_TYPE = 'type_invalid'
+    INVALID_LENGTH = 'length_invalid'
+    INVALID_OBJECT = 'invalid_object'
+    INVALID_OBJECT_LENGTH = 'object_length_invalid'
+    LIST_OR_TUPLE_NOT_IN_RANGE = 'list_or_tuple_not_in_range'
+    MISSING_REQUIRED_DATA = 'missing_required_data'
+    MISSING_REQUIRED_KEYS = 'missing_required_keys'
+    MISSING_REQUIRED_VALUES = 'missing_required_values'
+    NOT_EVEN = 'not_even'
+    NOT_ODD = 'not_odd'
+    NOT_IN_OPTIONS = 'not_in_options'
+    NOT_EXCLUDED = 'not_excluded'
+    NOT_IN_RANGE = 'not_in_range'
+    NUMBER_NOT_IN_RANGE = 'number_not_in_range'
+    STRING_NOT_IN_RANGE = 'string_not_in_range'
+
+
+class ValidationError(Exception):
+    pass
 
 
 class Validator:
@@ -33,6 +57,16 @@ class Validator:
             keywords = kwds['kwds']
             self.log_errors = keywords.get('log_errors', False)
             self.group_errors = keywords.get('group_errors', True)
+
+        # Values used by rule functions
+        self._type = None
+        self.data_key = None
+        self.data_value = None
+        self.rule_key = None
+        self.rule_value = None
+        self.current_rules = None
+        self.is_known_exception = False
+        self.error_key = ErrorKeys.INVALID_TYPE
 
     def validate_object(self, data, rules, defaults):
         result = {'ok': False}
@@ -98,207 +132,242 @@ class Validator:
 
         return SimpleNamespace(**result)
 
+    def raise_known_exception(self, message, ex_type=ValidationError):
+        self.is_known_exception = True
+        raise ex_type(message)
+
+    def set_validation_data(self, **kwargs):
+        self.data_key = kwargs['data_key']
+        self.data_value = kwargs['data_value']
+        self.rule_key = kwargs['rule_key']
+        self.rule_value = kwargs['rule_value']
+        self.current_rules = kwargs['all_rules']
+        self._type = kwargs['all_rules']['type']
+
+    def append_error(self, **kwargs):
+        key = self.data_key
+        rules = self.current_rules
+        rule_key = self.rule_key
+        error_key = self.error_key
+        self.format_error(error_key, (key, ), rules, key, rule_key)
+
+    def validate_length(self, **kwargs):
+        self.set_validation_data(**kwargs)
+        self.error_key = ErrorKeys.INVALID_LENGTH
+
+        if not isinstance(kwargs['rule_value'], int):
+            self.raise_known_exception('int value expected for length')
+
+        if self._type in self.basic_types_plus_regex:
+            if len(f"{self.data_value}") != self.rule_value:
+                self.append_error()
+
+        else:
+            self.error_key = ErrorKeys.INVALID_OBJECT_LENGTH
+
+            if hasattr(self.data_value, '__len__'):
+                if len(self.data_value) != self.rule_value:
+                    self.append_error()
+            else:
+                self.append_error()
+
+    def validate_contains(self, **kwargs):
+        self.set_validation_data(**kwargs)
+        self.error_key = ErrorKeys.MISSING_REQUIRED_DATA
+
+        if isinstance(self.rule_value, str):
+            if self._type in self.basic_types_plus_regex:
+                if self.rule_value not in str(self.data_value):
+                    self.append_error()
+
+            elif self._type == 'dict':
+                self.error_key = ErrorKeys.MISSING_REQUIRED_KEYS
+                if self.rule_value not in self.data_value:
+                    self.append_error()
+
+            else:
+                self.error_key = ErrorKeys.MISSING_REQUIRED_VALUES
+                if self.rule_value not in set(self.data_value):
+                    self.append_error()
+
+        else:
+            if isinstance(self.rule_value, (list, tuple)):
+                #Todo: modify so user can know the specific values missing
+                if self._type in self.basic_types_plus_regex:
+
+                    if not all(val in str(self.data_value)
+                               for val in self.rule_value):
+                        self.append_error()
+
+                elif self._type == 'dict':
+                    self.error_key = ErrorKeys.MISSING_REQUIRED_KEYS
+
+                    if not all(val in set(self.data_value.keys())
+                               for val in self.rule_value):
+                        self.append_error()
+                else:
+                    self.error_key = ErrorKeys.MISSING_REQUIRED_VALUES
+                    if not all(val in set(self.data_value)
+                               for val in self.rule_value):
+                        self.append_error()
+
+    def validate_excludes(self, **kwargs):
+        self.set_validation_data(**kwargs)
+        self.error_key = ErrorKeys.NOT_EXCLUDED
+        if self._type in self.basic_types_plus_regex:
+
+            if self.data_value in set(self.rule_value):
+                self.append_error()
+
+        else:
+            if any(val in set(self.data_value) for val in self.rule_value):
+                self.append_error()
+
+    def validate_options(self, **kwargs):
+        self.set_validation_data(**kwargs)
+        self.error_key = ErrorKeys.NOT_IN_OPTIONS
+
+        if self._type in self.basic_types_plus_regex:
+            if self.data_value not in set(self.rule_value):
+                self.append_error()
+        else:
+            if not all(val in set(self.rule_value) for val in self.data_value):
+                self.append_error()
+
+    def validate_expression(self, **kwargs):
+        regex = None
+        self.set_validation_data(**kwargs)
+        self.error_key = ErrorKeys.DOES_NOT_MATCH_REGEX
+        try:
+            regex = re.compile(self.rule_value, re.VERBOSE)
+
+        except Exception as ex:
+            self.raise_known_exception(f'error compiling regex: {ex}')
+
+        if regex.match(self.data_value) == None:
+            self.append_error()
+
+    def validate_range(self, **kwargs):
+        self.set_validation_data(**kwargs)
+        self.error_key = ErrorKeys.NOT_IN_RANGE
+        if not isinstance(self.rule_value, (list, tuple)):
+            self.raise_known_exception('list or tuple expected for range')
+
+        if len(self.rule_value) != 2:
+            self.raise_known_exception('range object should have 2 values')
+
+        if self._type == 'str':
+            self.error_key = ErrorKeys.STRING_NOT_IN_RANGE
+            if not len(self.data_value) >= self.rule_value[0] and len(
+                    self.data_value) <= self.rule_value[1]:
+                self.append_error()
+
+        elif self._type == 'date':
+            self.error_key = ErrorKeys.DATE_NOT_IN_RANGE
+            min_date = None
+            max_date = None
+            cast_date = self.data_value if isinstance(
+                self.data_value, datetime) else parse_date(self.data_value)
+
+            if isinstance(self.data_value, datetime):
+                min_date = self.data_value if self.rule_value[
+                    0] == 'any' else parse_date(self.rule_value[0])
+                max_date = self.data_value if self.rule_value[
+                    1] == 'any' else parse_date(self.rule_value[1])
+
+            else:
+                min_date = parse_date(
+                    self.data_value
+                ) if self.rule_value[0] == 'any' else parse_date(
+                    self.rule_value[0])
+                max_date = parse_date(
+                    self.data_value
+                ) if self.rule_value[1] == 'any' else parse_date(
+                    self.rule_value[1])
+
+            if not (cast_date >= min_date and cast_date <= max_date):
+                self.append_error()
+
+        elif self._type in ('list', 'tuple'):
+            self.error_key = ErrorKeys.LIST_OR_TUPLE_NOT_IN_RANGE
+            if not len(self.data_value) >= self.rule_value[0] and len(
+                    self.data_value) <= self.rule_value[1]:
+                self.append_error()
+
+        elif self._type in ('int', 'float', 'even', 'odd'):
+            self.error_key = ErrorKeys.NUMBER_NOT_IN_RANGE
+            min_value = float(
+                '-inf') if self.rule_value[0] == 'any' else self.rule_value[0]
+            max_value = float(
+                'inf') if self.rule_value[1] == 'any' else self.rule_value[1]
+            cast_value = literal_eval(str(self.data_value))
+
+            if not (cast_value >= float(min_value)
+                    and cast_value <= float(max_value)):
+                self.append_error()
+
+    def validate_startswith(self, **kwargs):
+        self.set_validation_data(**kwargs)
+        self.error_key = ErrorKeys.DOES_NOT_STARTWITH
+        if self._type in self.basic_types_plus_regex:
+            if not str(self.data_value).startswith(self.rule_value):
+                self.append_error()
+        else:
+            if self._type in ('list', 'tuple'):
+                if not self.data_value or self.data_value[0] != self.rule_value:
+                    self.append_error()
+
+    def validate_endswith(self, **kwargs):
+        self.set_validation_data(**kwargs)
+        self.error_key = ErrorKeys.DOES_NOT_ENDWITH
+        if self._type in self.basic_types_plus_regex:
+            if not str(self.data_value).endswith(self.rule_value):
+                self.append_error()
+        else:
+            if self._type in ('list', 'tuple'):
+                if not self.data_value or self.data_value[
+                        -1] != self.rule_value:
+                    self.append_error()
+
+    def validate_unknown(self, **kwargs):
+        pass
+
     def validate_rule(self, key, value, rules):
 
-        _type = rules['type']
-        rule_error_key = 'type_invalid'
-        known_exception = False
+        rule_map = {
+            # 'type': self.validate_type,
+            'range': self.validate_range,
+            'length': self.validate_length,
+            'contains': self.validate_contains,
+            'excludes': self.validate_excludes,
+            'options': self.validate_options,
+            'expression': self.validate_expression,
+            'startswith': self.validate_startswith,
+            'endswith': self.validate_endswith,
+            'unknown': self.validate_unknown,
+        }
 
-        def append_error(error_key=''):
-            error_key = error_key or rule_error_key
-            self.format_error(error_key, (key, ), rules, key, rule_key)
-
-        def raise_invalid_rule(data_type, rule_name):
-            raise TypeError(f'{rule_name} not valid for {data_type}')
+        rule_set = set(rule_map.keys())
 
         for rule_key, rule_value in rules.items():
 
             try:
-                if rule_key == 'length':
-                    rule_error_key = 'length_invalid'
-                    if not isinstance(rule_value, int):
-                        known_exception = True
-                        raise TypeError('int value expected for length')
 
-                    if _type in self.basic_types_plus_regex:
-                        if len(f'{value}') != rule_value:
-                            append_error()
-
-                    else:
-                        rule_error_key = 'object_length_invalid'
-
-                        if hasattr(value, '__len__'):
-                            if len(value) != rule_value:
-                                append_error()
-                        else:
-                            append_error()
-
-                elif rule_key == 'options':
-                    rule_error_key = 'not_in_options'
-                    if _type in self.basic_types_plus_regex:
-                        if value not in set(rule_value):
-                            append_error()
-                    else:
-                        if not all(val in set(rule_value) for val in value):
-                            append_error()
-
-                elif rule_key == 'excludes':
-                    rule_error_key = 'not_excluded'
-                    if _type in self.basic_types_plus_regex:
-
-                        if value in set(rule_value):
-                            append_error()
-
-                    else:
-                        if any(val in set(value) for val in rule_value):
-                            append_error()
-
-                elif rule_key == 'contains':
-                    rule_error_key = 'missing_required_data'
-                    if isinstance(rule_value, str):
-                        if _type in self.basic_types_plus_regex:
-                            if rule_value not in str(value):
-                                append_error()
-
-                        elif _type == 'dict':
-                            rule_error_key = 'missing_required_keys'
-                            if rule_value not in value:
-                                append_error()
-
-                        else:
-                            rule_error_key = 'missing_required_values'
-                            if rule_value not in set(value):
-                                append_error()
-
-                    else:
-                        if isinstance(rule_value, (list, tuple)):
-                            #Todo: modify so that user can know the specific values missing
-                            if _type in self.basic_types_plus_regex:
-
-                                if not all(val in str(value)
-                                           for val in rule_value):
-                                    append_error()
-
-                            elif _type == 'dict':
-                                rule_error_key = 'missing_required_keys'
-
-                                if not all(val in set(value.keys())
-                                           for val in rule_value):
-                                    append_error()
-                            else:
-                                rule_error_key = 'missing_required_values'
-                                if not all(val in set(value)
-                                           for val in rule_value):
-                                    append_error()
-
-                elif rule_key == 'expression':
-                    regex = None
-                    rule_error_key = 'does_not_match_regex'
-                    try:
-                        regex = re.compile(rule_value, re.VERBOSE)
-
-                    except Exception as ex:
-                        known_exception = True
-                        raise Exception(f'error compiling regex: {ex}')
-
-                    if regex.match(value) == None:
-                        append_error()
-
-                elif rule_key == 'startswith':
-                    rule_error_key = 'does_not_startwith'
-                    if _type in self.basic_types_plus_regex:
-                        if not str(value).startswith(rule_value):
-                            append_error()
-                    else:
-                        if _type in ('list', 'tuple'):
-                            if not value or value[0] != rule_value:
-                                append_error()
-
-                        else:
-                            raise_invalid_rule(_type, rule_key)
-
-                elif rule_key == 'endswith':
-                    rule_error_key = 'does_not_endwith'
-                    if _type in self.basic_types_plus_regex:
-                        if not str(value).endswith(rule_value):
-                            append_error()
-                    else:
-                        if _type in ('list', 'tuple'):
-                            if not value or value[-1] != rule_value:
-                                append_error()
-
-                        else:
-                            raise_invalid_rule(_type, rule_key)
-
-                elif rule_key == 'range':
-                    rule_error_key = 'not_in_range'
-                    if not isinstance(rule_value, (list, tuple)):
-                        known_exception = True
-                        raise TypeError('list or tuple expected for range')
-
-                    if len(rule_value) != 2:
-                        known_exception = True
-                        raise ValueError('range object should have 2 values')
-
-                    if _type == 'str':
-                        rule_error_key = 'string_not_in_range'
-                        if not len(value) >= rule_value[0] and len(
-                                value) <= rule_value[1]:
-                            append_error()
-
-                    elif _type == 'date':
-                        rule_error_key = 'date_not_in_range'
-                        min_date = None
-                        max_date = None
-                        cast_date = value if isinstance(
-                            value, datetime) else parse_date(value)
-
-                        if isinstance(value, datetime):
-                            min_date = value if rule_value[
-                                0] == 'any' else parse_date(rule_value[0])
-                            max_date = value if rule_value[
-                                1] == 'any' else parse_date(rule_value[1])
-
-                        else:
-                            min_date = parse_date(value) if rule_value[
-                                0] == 'any' else parse_date(rule_value[0])
-                            max_date = parse_date(value) if rule_value[
-                                1] == 'any' else parse_date(rule_value[1])
-
-                        if not (cast_date >= min_date
-                                and cast_date <= max_date):
-                            append_error()
-
-                    elif _type in ('list', 'tuple'):
-                        rule_error_key = 'list_or_tuple_not_in_range'
-                        if not len(value) >= rule_value[0] and len(
-                                value) <= rule_value[1]:
-                            append_error()
-
-                    elif _type in ('int', 'float', 'even', 'odd'):
-                        rule_error_key = 'number_not_in_range'
-                        min_value = float(
-                            '-inf'
-                        ) if rule_value[0] == 'any' else rule_value[0]
-                        max_value = float(
-                            'inf') if rule_value[1] == 'any' else rule_value[1]
-                        cast_value = literal_eval(str(value))
-
-                        if not (cast_value >= min_value
-                                and cast_value <= max_value):
-                            append_error()
-
-                    else:
-                        raise_invalid_rule(_type, rule_key)
+                if rule_key in rule_set:
+                    rule_map.get(rule_key, 'unknown')(rule_key=rule_key,
+                                                      rule_value=rule_value,
+                                                      data_key=key,
+                                                      data_value=value,
+                                                      all_rules=rules)
 
             except Exception as ex:
-                if known_exception:
+                if self.is_known_exception:
                     raise
                 else:
                     if self.log_errors:
                         logging.warning(str(ex))
 
-                    append_error()
+                    self.append_error()
 
     def is_type(self,
                 data_type,
@@ -311,13 +380,13 @@ class Validator:
 
         status = False
 
-        def append_type_error(error_key='type_invalid'):
+        def append_type_error(error_key=ErrorKeys.INVALID_TYPE):
             self.format_error(error_key, (data_type, type(data).__qualname__),
                               rules,
                               field_name,
                               'type',
                               append_errors,
-                              raised_exception_type=TypeError)
+                              raised_exception_type=ValidationError)
 
         try:
 
@@ -339,33 +408,31 @@ class Validator:
                 if not isinstance(data, datetime):
 
                     if not isinstance(parse_date(data), datetime):
-                        append_type_error('invalid_date')
+                        append_type_error(ErrorKeys.INVALID_DATE)
 
             elif data_type == 'email':
-               
+
                 email_re = re.compile(
                     """^(([^<>()[\]\\.,;:\s@\"]+(\.[^<>()[\]\\.,;:\s@\"]+)*)
                 |(\".+\"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])
                 |(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$""", re.VERBOSE)
 
                 if email_re.match(str(data)) == None:
-                    append_type_error('invalid_email')
-
-               
+                    append_type_error(ErrorKeys.INVALID_EMAIL)
 
             elif data_type == 'even':
                 if not (self.is_type('int', data, rules, strict=strict)
                         and int(data) % 2 == 0):
-                    append_type_error('not_even')
+                    append_type_error(ErrorKeys.NOT_EVEN)
 
             elif data_type == 'odd':
                 if not (self.is_type('int', data, rules, strict=strict)
                         and int(data) % 2 == 1):
-                    append_type_error('not_odd')
+                    append_type_error(ErrorKeys.NOT_ODD)
 
             elif data_type == 'object':
                 if not isinstance(data, rules['object']):
-                    append_type_error('invalid_object')
+                    append_type_error(ErrorKeys.INVALID_OBJECT)
 
             status = True
 
@@ -383,7 +450,7 @@ class Validator:
                      field='',
                      rule_key='',
                      append_errors=True,
-                     raised_exception_type=ValueError):
+                     raised_exception_type=ValidationError):
 
         formatted_message = ''
         raw_error = errm.get(f'field_{error_key}', '') if field else ''
@@ -391,7 +458,7 @@ class Validator:
         custom_message = rules.get(f'{rule_key}-message', '') or rules.get(
             'message', '')
 
-        if error_key == 'type_invalid':
+        if error_key == ErrorKeys.INVALID_TYPE:
             ev = error_values
             error_fields = (ev[0], field, ev[1]) if field else (ev[0], ev[1])
             formatted_message = custom_message or raw_error % error_fields
