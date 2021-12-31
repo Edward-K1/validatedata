@@ -16,7 +16,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/Edward-K1/validatedata",
     install_requires=['python-dateutil'],
-    packages=setuptools.find_packages(exclude=['tests']),
+    packages=setuptools.find_packages(exclude=['tests', '.github']),
     include_package_data=True,
     keywords = "validate data validation",
     classifiers=[
@@ -24,6 +24,6 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    python_requires='>=3.3',
+    python_requires='>=3.5',
 
 )

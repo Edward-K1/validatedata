@@ -1,6 +1,6 @@
 error_messages = {
     'type_invalid': 'Expected value of type %s, found %s',
-    'field_type_invalid': 'Expected value of type %s for %s field, found %s',
+    'field_type_invalid': 'Expected value of type %s for field %s, found %s',
     'length_invalid': 'value is not of required length',
     'object_length_invalid': 'object does not have required number of elements',
     'not_in_options': 'value not in list of options',

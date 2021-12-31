@@ -13,8 +13,6 @@ pip install validatedata
 ```
 
 
-> Note: This is an alpha release. Please test all required functionality
-
 
 ### Types
 
