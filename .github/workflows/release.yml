@@ -1,9 +1,9 @@
-name: build
+name: release
 
 on:
   push:
-    tags:
-      - *
+    branches:
+      - main
 
 jobs:
   deploy:
