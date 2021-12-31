@@ -3,4 +3,6 @@ venv/
 *__pycache__*
 temp/
 .vscode/
+build/
+validatedata.egg-info/
 
