@@ -82,6 +82,7 @@ class TestTypes(BaseTest):
         result4 = validate_data([60], self.all_int_rules[3])
         result5 = validate_data([20000], self.all_int_rules[3])
 
+        print(result5)
         self.assertEqual(result1.ok, True)
         self.assertEqual(result2.ok, True)
         self.assertEqual(result3.ok, True)
@@ -134,6 +135,7 @@ class TestTypes(BaseTest):
         result3 = validate_data([{5, 6, 9}], self.all_set_rules[1])
         result4 = validate_data([{1, 1, 2, 8}], self.all_set_rules[1])
 
+        print(result4)
         self.assertEqual(result1.ok, True)
         self.assertEqual(result2.ok, False)
         self.assertEqual(result3.ok, True)
