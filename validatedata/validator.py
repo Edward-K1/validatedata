@@ -362,6 +362,7 @@ class Validator:
 
             except Exception as ex:
                 if self.is_known_exception:
+                    self.is_known_exception = False
                     raise
                 else:
                     if self.log_errors:
