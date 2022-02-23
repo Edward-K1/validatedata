@@ -14,49 +14,30 @@ pip install validatedata
 
 
 
-### Types
-
-- bool
-- date
-- email
-- even
-- float
-- int
-- odd
-- str
-- dict
-- list
-- regex
-- set
-- tuple
-- object
-
-&nbsp;
-
-
-
-### Rules
-- length - integer - expected length of a string, int, or object
-- contains - string or tuple of values expected in an object
-- excludes - string or tuple of values not permitted
-- options - tuple - a tuple of permitted values
-- strict - boolean indicating whether data should be type cast or not
-- expression - string - ensures data matches a given regular expression
-- type - string - specifies type of data expected. Should always be included
-- range - tuple - specifies permitted range or values. Used with numbers and dates
-- startswith - object - string, int, et cetera that a type starts with
-- endswith - object - string, int, et cetera that a type ends with
-
-&nbsp;
-
-
 ## Usage
 
 
 
-There are two ways to validate data:
+There are three ways to validate data:
 
-**1. Using the decorator**
+**1. Using the validate_types decorator**
+
+```python
+from validatedata import validate_types
+
+
+@validate_types()
+def sum(num1:int, num2:int):
+    return num1 + num2
+
+print(sum(4, 6))
+
+# raises exception
+sum('bread', 'butter')
+
+```
+
+**2. Using the validate decorator**
 
 ```python
 from validatedata import validate
@@ -95,7 +76,7 @@ or
 ```
 
 
-**2. Using the validate_data function**
+**3. Using the validate_data function**
 
 ```python
 from validatedata import validate_data
@@ -159,6 +140,40 @@ else:
 
 ```
 
+### Types (*`validate` and `validate_data`*)
+
+- bool
+- date
+- email
+- even
+- float
+- int
+- odd
+- str
+- dict
+- list
+- regex
+- set
+- tuple
+- object
+
+&nbsp;
+
+
+
+### Rules
+- length - integer - expected length of a string, int, or object
+- contains - string or tuple of values expected in an object
+- excludes - string or tuple of values not permitted
+- options - tuple - a tuple of permitted values
+- strict - boolean indicating whether data should be type cast or not
+- expression - string - ensures data matches a given regular expression
+- type - string - specifies type of data expected. Should always be included
+- range - tuple - specifies permitted range or values. Used with numbers and dates
+- startswith - object - string, int, et cetera that a type starts with
+- endswith - object - string, int, et cetera that a type ends with
+
+
 &nbsp;
 
 
@@ -174,7 +189,7 @@ signup_rules = [{
  {
     'type':'str',
     'expression':r'(?=\S*[a-z])(?=\S*[A-Z])(?=\S*\d)(?=\S*[^\w\s])\S{8,}$',
-    'message':'password must contain a number, an uppercase letter, and should be at least 8 characters long without spaces'
+    'message':'password must contain a number, an uppercase letter, a symbol, and should be at least 8 characters long without spaces'
 }]
 
 
@@ -185,7 +200,9 @@ class User:
 
 
 user = User()
-user.signup('helterskelter', 'paddle', 'Arosebyanyname?1')
+response = user.signup('helterskelter', 'paddle', 'Arosebyanyname?1')
+# response = user.signup('helterskelter', 'paddle@gmail.com', 'Arosebyanyname?1')
+print(response)
 
 
 

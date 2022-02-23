@@ -382,7 +382,11 @@ class Validator:
         status = False
 
         def append_type_error(error_key=ErrorKeys.INVALID_TYPE):
-            self.format_error(error_key, (data_type, type(data).__qualname__),
+            true_type = data_type
+            if true_type == 'annotation':
+                true_type = rules['object'].__qualname__
+
+            self.format_error(error_key, (true_type, type(data).__qualname__),
                               rules,
                               field_name,
                               'type',
@@ -434,6 +438,10 @@ class Validator:
             elif data_type == 'object':
                 if not isinstance(data, rules['object']):
                     append_type_error(ErrorKeys.INVALID_OBJECT)
+
+            elif data_type == 'annotation':
+                if not isinstance(data, rules['object']):
+                    append_type_error(ErrorKeys.INVALID_TYPE)
 
             status = True
 

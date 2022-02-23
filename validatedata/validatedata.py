@@ -5,7 +5,7 @@ from inspect import getfullargspec
 from .validator import Validator
 
 BASIC_TYPES = ('bool', 'date', 'email', 'even', 'float', 'int', 'odd', 'str')
-EXTENDED_TYPES = ('dict', 'list', 'object', 'regex', 'set', 'tuple')
+EXTENDED_TYPES = ('dict', 'list', 'object','annotation', 'regex', 'set', 'tuple')
 NATIVE_TYPES = (bool, float, int, str, dict, list, set, tuple)
 
 
@@ -74,6 +74,73 @@ def validate(rule, raise_exceptions=False, is_class=False, **kwds):
         return wrapper
 
     return decorator
+
+
+
+def validate_types(raise_exceptions=True, is_class=False, **kwds):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(obj=EMPTY, *args, **kwargs):
+            func_data = OrderedDict()
+            func_defaults = OrderedDict()
+            func_defn = getfullargspec(func)
+            func_annotations = OrderedDict(func_defn.annotations)
+            obj_is_cls = True if (is_class == True
+                                  or func_defn.args[0] == 'self') else False
+            clean_params = func_defn.args[1:] if obj_is_cls else func_defn.args
+
+            # initialize keys with empty objects
+            func_data.update(
+                zip(clean_params, [EMPTY for x in range(len(clean_params))]))
+
+            # assign default values to keys that had them
+            if func_defn.defaults:
+                defaults_dict = OrderedDict(
+                    zip(clean_params[-len(func_defn.defaults):],
+                        func_defn.defaults))
+                func_data.update(defaults_dict)
+                func_defaults.update(defaults_dict)
+
+            # if obj is not a class, it contains the value of the first parameter
+            if not obj_is_cls:
+                func_data[clean_params[0]] = obj
+
+            if args:
+                if obj_is_cls:
+                    func_data.update(zip(clean_params, args))
+                else:
+                    func_data.update(zip(clean_params[1:], args))
+
+            if kwargs:
+                func_data.update(
+                    zip([
+                        k for k in kwargs.keys() if k in set(func_data.keys())
+                    ], kwargs.values()))
+
+            rules = [{
+                'type': 'annotation',
+                'object': func_annotations[key]
+            } for key in func_annotations]
+
+            result = validate_data(func_data, rules, raise_exceptions,
+                                   func_defaults, **kwds)
+
+            if result.ok:
+                if isinstance(obj, EmptyObject):
+                    return func(*args, **kwargs)
+                else:
+
+                    return func(obj, *args, **kwargs)
+            else:
+                return {'errors': result.errors}
+
+        return wrapper
+
+    return decorator
+
+
+
+
 
 
 def validate_data(data, rule, raise_exceptions=False, defaults={}, **kwds):

@@ -20,7 +20,6 @@ class TestTypes(BaseTest):
         result3 = validate_data('02-October-2090', self.all_date_rules[0])
         result4 = validate_data([556], self.all_date_rules[0])
 
-        print(result3)
         self.assertEqual(result1.ok, True)
         self.assertEqual(result2.ok, True)
         self.assertEqual(result3.ok, False)
