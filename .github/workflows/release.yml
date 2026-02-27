@@ -8,19 +8,35 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
+    environment:
+      name: pypi
+      url: https://pypi.org/p/validatedata
+
     permissions:
       id-token: write
+      contents: write
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
           pip install build
+
       - name: Build package
         run: python -m build
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Upload Binaries to GitHub Release
+        uses: softprops/action-gh-release@a06a81a
+        with:
+          files: dist/*
