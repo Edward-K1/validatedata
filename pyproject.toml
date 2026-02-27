@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "validatedata"
+version = "0.2.1"
+authors = [
+  { name="Edward Kigozi", email="edwardinbytes@gmail.com" },
+]
+description = "An easier way to validate data in python"
+readme = "README.md"
+# Updated to the new SPDX string format to silence warnings
+license = "MIT"
+requires-python = ">=3.7"
+dependencies = [
+    "python-dateutil",
+]
+keywords = ["validate", "data", "validation"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/Edward-K1/validatedata"
+Repository = "https://github.com/Edward-K1/validatedata.git"
+Issues = "https://github.com/Edward-K1/validatedata/issues"
+
+[tool.setuptools]
+packages = ["validatedata"]
