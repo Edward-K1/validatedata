@@ -114,7 +114,7 @@ class BaseTest(unittest.TestCase):
                     'range': (6, 'any'),
                     'options': ('validate', 'central', 'town'),
                     'excludes': ('neo', 'bread'),
-                    'startwith': 'valid',
+                    'startswith': 'valid',
                     'endswith': 'ate',
                     'contains': 'lid'
                 }.items()),

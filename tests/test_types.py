@@ -12,7 +12,7 @@ class TestTypes(BaseTest):
         self.assertEqual(result1.ok, True)
         self.assertEqual(result2.ok, True)
         self.assertEqual(result3.ok, False)
-        
+
 
     def test_date(self):
         result1 = validate_data('23-Oct-2000', self.all_date_rules[0])
@@ -150,5 +150,5 @@ class TestTypes(BaseTest):
 
         person = self.person_class()
         result1 = validate_data([person], self.all_object_rules[0])
-    
+
         self.assertEqual(result1.ok, True)

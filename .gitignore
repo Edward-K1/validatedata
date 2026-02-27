@@ -5,4 +5,5 @@ temp/
 .vscode/
 build/
 validatedata.egg-info/
+deploy.sh
 
