@@ -97,15 +97,20 @@ class BaseTest(unittest.TestCase):
 
         self.all_str_rules = [
             self.str_rule,
-            {**self.str_rule,
-                'length': 8,
-                'range': (6, 'any'),
-                'options': ('validate', 'central', 'town'),
-                'excludes': ('neo', 'bread'),
-                'startswith': 'valid',
-                'endswith': 'ate',
-                'contains': 'lid'},
-            {**self.str_rule, 'expression': r'\d{8,}', 'range': ('any', 20)},
+            dict(
+                self.str_rule.items() | {
+                    'length': 8,
+                    'range': (6, 'any'),
+                    'options': ('validate', 'central', 'town'),
+                    'excludes': ('neo', 'bread'),
+                    'startswith': 'valid',
+                    'endswith': 'ate',
+                    'contains': 'lid'
+                }.items()),
+            dict(self.str_rule.items() | {
+                'expression': r'\d{8,}',
+                'range': ('any', 20)
+            }.items())
         ]
 
         self.all_dict_rules = [

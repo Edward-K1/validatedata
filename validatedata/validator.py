@@ -434,9 +434,8 @@ class Validator:
         self._type = kwargs['all_rules']['type']
 
     def _get_error_message(self, error_key, rules, field='', rule_key=''):
-        key_val = error_key.value if hasattr(error_key, 'value') else error_key
-        raw_error = errm.get(f'field_{key_val}', '') if field else ''
-        raw_error = raw_error or errm.get(key_val, '') or errm['no_error_message']
+        raw_error = errm.get(f'field_{error_key}', '') if field else ''
+        raw_error = raw_error or errm.get(error_key, '') or errm['no_error_message']
         custom_message = rules.get(f'{rule_key}-message', '') or rules.get('message', '')
         return custom_message or raw_error
 
@@ -533,9 +532,8 @@ class Validator:
 
         if self._type == 'str':
             self.error_key = ErrorKeys.STRING_NOT_IN_RANGE
-            min_len = 0 if self.rule_value[0] == 'any' else self.rule_value[0]
-            max_len = float('inf') if self.rule_value[1] == 'any' else self.rule_value[1]
-            if not (len(self.data_value) >= min_len and len(self.data_value) <= max_len):
+            if not (len(self.data_value) >= self.rule_value[0] and
+                    len(self.data_value) <= self.rule_value[1]):
                 self.append_error(path=path)
 
         elif self._type == 'date':
@@ -654,9 +652,8 @@ class Validator:
             if true_type == 'annotation':
                 true_type = rules['object'].__qualname__
 
-            key_val = error_key.value if hasattr(error_key, 'value') else error_key
-            raw_error = errm.get(f'field_{key_val}', '') if field_name else ''
-            raw_error = raw_error or errm.get(key_val, '') or errm['no_error_message']
+            raw_error = errm.get(f'field_{error_key}', '') if field_name else ''
+            raw_error = raw_error or errm.get(error_key, '') or errm['no_error_message']
             custom_message = rules.get('type-message', '') or rules.get('message', '')
 
             if error_key == ErrorKeys.INVALID_TYPE:
