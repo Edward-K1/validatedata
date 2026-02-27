@@ -2,7 +2,7 @@ from collections import OrderedDict
 from functools import wraps
 from inspect import getfullargspec
 
-from .validator import Validator, _has_nested_rules, _has_nested_rules
+from .validator import Validator, _has_nested_rules
 
 BASIC_TYPES = (
     'bool', 'color', 'date', 'email', 'even', 'float', 'int', 'ip',
@@ -98,7 +98,9 @@ def validate_types(func=None, raise_exceptions=True, is_class=False, mutate=Fals
             func_data = OrderedDict()
             func_defaults = OrderedDict()
             func_defn = getfullargspec(f)
-            func_annotations = OrderedDict(func_defn.annotations)
+            func_annotations = OrderedDict(
+                (k, v) for k, v in func_defn.annotations.items() if k != 'return'
+            )
             obj_is_cls = True if (is_class == True
                                   or func_defn.args[0] == 'self') else False
             clean_params = func_defn.args[1:] if obj_is_cls else func_defn.args
