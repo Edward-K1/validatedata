@@ -2,10 +2,13 @@ from collections import OrderedDict
 from functools import wraps
 from inspect import getfullargspec
 
-from .validator import Validator
+from .validator import Validator, _has_nested_rules
 
-BASIC_TYPES = ('bool', 'date', 'email', 'even', 'float', 'int', 'odd', 'str')
-EXTENDED_TYPES = ('dict', 'list', 'object','annotation', 'regex', 'set', 'tuple')
+BASIC_TYPES = (
+    'bool', 'color', 'date', 'email', 'even', 'float', 'int', 'ip',
+    'odd', 'phone', 'prime', 'semver', 'slug', 'str', 'url', 'uuid'
+)
+EXTENDED_TYPES = ('dict', 'list', 'object', 'annotation', 'regex', 'set', 'tuple')
 NATIVE_TYPES = (bool, float, int, str, dict, list, set, tuple)
 
 
@@ -20,7 +23,7 @@ class EmptyObject:
 EMPTY = EmptyObject()
 
 
-def validate(rule, raise_exceptions=False, is_class=False, **kwds):
+def validate(rule, raise_exceptions=False, is_class=False, mutate=False, **kwds):
     def decorator(func):
         @wraps(func)
         def wrapper(obj=EMPTY, *args, **kwargs):
@@ -31,11 +34,9 @@ def validate(rule, raise_exceptions=False, is_class=False, **kwds):
                                   or func_defn.args[0] == 'self') else False
             clean_params = func_defn.args[1:] if obj_is_cls else func_defn.args
 
-            # initialize keys with empty objects
             func_data.update(
                 zip(clean_params, [EMPTY for x in range(len(clean_params))]))
 
-            # assign default values to keys that had them
             if func_defn.defaults:
                 defaults_dict = OrderedDict(
                     zip(clean_params[-len(func_defn.defaults):],
@@ -43,7 +44,6 @@ def validate(rule, raise_exceptions=False, is_class=False, **kwds):
                 func_data.update(defaults_dict)
                 func_defaults.update(defaults_dict)
 
-            # if obj is not a class, it contains the value of the first parameter
             if not obj_is_cls:
                 func_data[clean_params[0]] = obj
 
@@ -60,14 +60,21 @@ def validate(rule, raise_exceptions=False, is_class=False, **kwds):
                     ], kwargs.values()))
 
             result = validate_data(func_data, rule, raise_exceptions,
-                                   func_defaults, **kwds)
+                                   func_defaults, mutate=mutate, **kwds)
 
             if result.ok:
-                if isinstance(obj, EmptyObject):
-                    return func(*args, **kwargs)
+                if mutate and hasattr(result, 'data') and result.data:
+                    # pass transformed values to the function
+                    transformed = result.data
+                    if obj_is_cls:
+                        return func(obj, *transformed, **kwargs)
+                    else:
+                        return func(*transformed, **kwargs)
                 else:
-
-                    return func(obj, *args, **kwargs)
+                    if isinstance(obj, EmptyObject):
+                        return func(*args, **kwargs)
+                    else:
+                        return func(obj, *args, **kwargs)
             else:
                 return {'errors': result.errors}
 
@@ -76,24 +83,31 @@ def validate(rule, raise_exceptions=False, is_class=False, **kwds):
     return decorator
 
 
+def validate_types(func=None, raise_exceptions=True, is_class=False, mutate=False, **kwds):
+    """
+    Decorator that validates function arguments against their type annotations.
 
-def validate_types(raise_exceptions=True, is_class=False, **kwds):
-    def decorator(func):
-        @wraps(func)
+    Can be in any of the formats below:
+        @validate_types
+        @validate_types()
+        @validate_types(raise_exceptions=False)
+    """
+    def decorator(f):
+        @wraps(f)
         def wrapper(obj=EMPTY, *args, **kwargs):
             func_data = OrderedDict()
             func_defaults = OrderedDict()
-            func_defn = getfullargspec(func)
-            func_annotations = OrderedDict(func_defn.annotations)
+            func_defn = getfullargspec(f)
+            func_annotations = OrderedDict(
+                (k, v) for k, v in func_defn.annotations.items() if k != 'return'
+            )
             obj_is_cls = True if (is_class == True
                                   or func_defn.args[0] == 'self') else False
             clean_params = func_defn.args[1:] if obj_is_cls else func_defn.args
 
-            # initialize keys with empty objects
             func_data.update(
                 zip(clean_params, [EMPTY for x in range(len(clean_params))]))
 
-            # assign default values to keys that had them
             if func_defn.defaults:
                 defaults_dict = OrderedDict(
                     zip(clean_params[-len(func_defn.defaults):],
@@ -101,7 +115,6 @@ def validate_types(raise_exceptions=True, is_class=False, **kwds):
                 func_data.update(defaults_dict)
                 func_defaults.update(defaults_dict)
 
-            # if obj is not a class, it contains the value of the first parameter
             if not obj_is_cls:
                 func_data[clean_params[0]] = obj
 
@@ -123,31 +136,39 @@ def validate_types(raise_exceptions=True, is_class=False, **kwds):
             } for key in func_annotations]
 
             result = validate_data(func_data, rules, raise_exceptions,
-                                   func_defaults, **kwds)
+                                   func_defaults, mutate=mutate, **kwds)
 
             if result.ok:
-                if isinstance(obj, EmptyObject):
-                    return func(*args, **kwargs)
+                if mutate and hasattr(result, 'data') and result.data:
+                    transformed = result.data
+                    if obj_is_cls:
+                        return f(obj, *transformed, **kwargs)
+                    else:
+                        return f(*transformed, **kwargs)
                 else:
-
-                    return func(obj, *args, **kwargs)
+                    if isinstance(obj, EmptyObject):
+                        return f(*args, **kwargs)
+                    else:
+                        return f(obj, *args, **kwargs)
             else:
                 return {'errors': result.errors}
 
         return wrapper
 
+    # support both @validate_types and @validate_types(...)
+    if func is not None:
+        # called as @validate_types without brackets — func is the decorated function
+        return decorator(func)
+
+    # called as @validate_types(...) with brackets
     return decorator
 
 
-
-
-
-
-def validate_data(data, rule, raise_exceptions=False, defaults={}, **kwds):
-
-    validator = Validator(NATIVE_TYPES, BASIC_TYPES, EXTENDED_TYPES,
-                          raise_exceptions, **kwds)
+def validate_data(data, rule, raise_exceptions=False, defaults={}, mutate=False, **kwds):
     expanded_rule = expand_rule(rule)
+    is_nested = _has_nested_rules(expanded_rule if isinstance(expanded_rule, list) else rule)
+    validator = Validator(NATIVE_TYPES, BASIC_TYPES, EXTENDED_TYPES,
+                          raise_exceptions, mutate=mutate, nested=is_nested, **kwds)
 
     if isinstance(expanded_rule, (dict, OrderedDict)):
         dict_rules = []
@@ -195,7 +216,6 @@ def expand_rule(rule):
         if _type == 'regex':
             if len(rule.split(':')) < 2:
                 raise ValueError('No regular expression provided')
-
             rule_dict['expression'] = rule.split(':')[1]
 
         if len(rule.split(':')) >= 2 and ':to:' not in rule:
@@ -218,11 +238,8 @@ def expand_rule(rule):
         for _rule in rule:
             if isinstance(_rule, str):
                 expanded_rules.append(expand_rule_string(_rule))
-
             elif isinstance(_rule, dict):
-
                 expanded_rules.append(_rule)
-
             else:
                 raise TypeError(
                     'Error expanding rules: expecting string or dict')
