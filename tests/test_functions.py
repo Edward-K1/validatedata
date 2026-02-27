@@ -1,5 +1,10 @@
 from collections import OrderedDict
-from validatedata.validatedata import validate, validate_data, expand_rule, validate_types
+from validatedata.validatedata import (
+    validate,
+    validate_data,
+    expand_rule,
+    validate_types,
+)
 from validatedata.validator import ValidationError
 from validatedata.messages import error_messages
 from .base import BaseTest
@@ -47,7 +52,7 @@ class TestCore(BaseTest):
             'firstname': 'x',  # too short (range 2-50)
             'lastname': 'Hollens',
             'email': 'not-an-email',
-            'age': 15  # under 18
+            'age': 15,  # under 18
         }
         result = validate_data(bad_data, self.user_data_dict_rule)
         self.assertFalse(result.ok)
@@ -97,6 +102,7 @@ class TestCore(BaseTest):
 
     def test_type_decorator_bare(self):
         """@validate_types without parentheses should work."""
+
         @validate_types
         def greet(name: str):
             return f'hello {name}'
@@ -108,6 +114,7 @@ class TestCore(BaseTest):
 
     def test_type_decorator_return_annotation_ignored(self):
         """Return type annotations must not be treated as a parameter rule."""
+
         @validate_types()
         def double(n: int) -> int:
             return n * 2
@@ -117,6 +124,7 @@ class TestCore(BaseTest):
 
     def test_type_decorator_raises_false(self):
         """With raise_exceptions=False, validation failure returns an error dict."""
+
         @validate_types(raise_exceptions=False)
         def square(n: int) -> int:
             return n * n

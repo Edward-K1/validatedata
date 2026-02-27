@@ -8,9 +8,15 @@ class TestNewTypes(BaseTest):
     # --- URL ---
 
     def test_url_valid(self):
-        self.assertTrue(validate_data(['https://example.com'], self.all_url_rules[0]).ok)
-        self.assertTrue(validate_data(['http://example.com/path?q=1'], self.all_url_rules[0]).ok)
-        self.assertTrue(validate_data(['ftp://files.example.org'], self.all_url_rules[0]).ok)
+        self.assertTrue(
+            validate_data(['https://example.com'], self.all_url_rules[0]).ok
+        )
+        self.assertTrue(
+            validate_data(['http://example.com/path?q=1'], self.all_url_rules[0]).ok
+        )
+        self.assertTrue(
+            validate_data(['ftp://files.example.org'], self.all_url_rules[0]).ok
+        )
 
     def test_url_invalid(self):
         result = validate_data(['not-a-url'], self.all_url_rules[0])
@@ -22,8 +28,12 @@ class TestNewTypes(BaseTest):
 
     def test_url_with_startswith_rule(self):
         # rule requires startswith 'https'
-        self.assertTrue(validate_data(['https://secure.example.com'], self.all_url_rules[1]).ok)
-        self.assertFalse(validate_data(['http://insecure.example.com'], self.all_url_rules[1]).ok)
+        self.assertTrue(
+            validate_data(['https://secure.example.com'], self.all_url_rules[1]).ok
+        )
+        self.assertFalse(
+            validate_data(['http://insecure.example.com'], self.all_url_rules[1]).ok
+        )
 
     # --- IP address ---
 
@@ -48,11 +58,15 @@ class TestNewTypes(BaseTest):
 
     def test_uuid_valid(self):
         self.assertTrue(
-            validate_data(['550e8400-e29b-41d4-a716-446655440000'], self.all_uuid_rules[0]).ok
+            validate_data(
+                ['550e8400-e29b-41d4-a716-446655440000'], self.all_uuid_rules[0]
+            ).ok
         )
         # uppercase should also be accepted
         self.assertTrue(
-            validate_data(['550E8400-E29B-41D4-A716-446655440000'], self.all_uuid_rules[0]).ok
+            validate_data(
+                ['550E8400-E29B-41D4-A716-446655440000'], self.all_uuid_rules[0]
+            ).ok
         )
 
     def test_uuid_invalid(self):
@@ -61,7 +75,9 @@ class TestNewTypes(BaseTest):
         self.assertIn(error_messages['invalid_uuid'], result.errors[0])
 
     def test_uuid_invalid_too_short(self):
-        self.assertFalse(validate_data(['550e8400-e29b-41d4'], self.all_uuid_rules[0]).ok)
+        self.assertFalse(
+            validate_data(['550e8400-e29b-41d4'], self.all_uuid_rules[0]).ok
+        )
 
     # --- Slug ---
 
@@ -82,8 +98,10 @@ class TestNewTypes(BaseTest):
         self.assertFalse(validate_data(['-leading'], self.all_slug_rules[0]).ok)
 
     def test_slug_with_length_rule(self):
-        self.assertTrue(validate_data(['hello'], self.all_slug_rules[1]).ok)   # exactly 5
-        self.assertFalse(validate_data(['hi'], self.all_slug_rules[1]).ok)     # too short
+        self.assertTrue(
+            validate_data(['hello'], self.all_slug_rules[1]).ok
+        )  # exactly 5
+        self.assertFalse(validate_data(['hi'], self.all_slug_rules[1]).ok)  # too short
 
     # --- Semantic version ---
 
@@ -99,7 +117,9 @@ class TestNewTypes(BaseTest):
 
     def test_semver_valid_build_metadata(self):
         self.assertTrue(validate_data(['1.0.0+build.1'], self.all_semver_rules[0]).ok)
-        self.assertTrue(validate_data(['1.0.0-beta+exp.sha.5114f85'], self.all_semver_rules[0]).ok)
+        self.assertTrue(
+            validate_data(['1.0.0-beta+exp.sha.5114f85'], self.all_semver_rules[0]).ok
+        )
 
     def test_semver_invalid(self):
         result = validate_data(['1.2'], self.all_semver_rules[0])
@@ -132,11 +152,15 @@ class TestNewTypes(BaseTest):
         self.assertFalse(validate_data(['rgb(300, 0, 0)'], self.all_color_rules[2]).ok)
 
     def test_color_hsl_valid(self):
-        self.assertTrue(validate_data(['hsl(0, 100%, 50%)'], self.all_color_rules[3]).ok)
+        self.assertTrue(
+            validate_data(['hsl(0, 100%, 50%)'], self.all_color_rules[3]).ok
+        )
         self.assertTrue(validate_data(['hsl(360, 0%, 0%)'], self.all_color_rules[3]).ok)
 
     def test_color_hsl_invalid(self):
-        self.assertFalse(validate_data(['hsl(400, 100%, 50%)'], self.all_color_rules[3]).ok)
+        self.assertFalse(
+            validate_data(['hsl(400, 100%, 50%)'], self.all_color_rules[3]).ok
+        )
 
     def test_color_named_valid(self):
         self.assertTrue(validate_data(['red'], self.all_color_rules[4]).ok)

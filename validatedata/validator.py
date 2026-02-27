@@ -60,7 +60,7 @@ _URL_RE = re.compile(
     r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
     r'(?::\d+)?'
     r'(?:/?|[/?]\S+)$',
-    re.IGNORECASE
+    re.IGNORECASE,
 )
 
 _SLUG_RE = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
@@ -86,34 +86,153 @@ _HSL_COLOR_RE = re.compile(
 )
 
 _NAMED_COLORS = {
-    'aliceblue', 'antiquewhite', 'aqua', 'aquamarine', 'azure', 'beige',
-    'bisque', 'black', 'blanchedalmond', 'blue', 'blueviolet', 'brown',
-    'burlywood', 'cadetblue', 'chartreuse', 'chocolate', 'coral',
-    'cornflowerblue', 'cornsilk', 'crimson', 'cyan', 'darkblue', 'darkcyan',
-    'darkgoldenrod', 'darkgray', 'darkgreen', 'darkgrey', 'darkkhaki',
-    'darkmagenta', 'darkolivegreen', 'darkorange', 'darkorchid', 'darkred',
-    'darksalmon', 'darkseagreen', 'darkslateblue', 'darkslategray',
-    'darkslategrey', 'darkturquoise', 'darkviolet', 'deeppink', 'deepskyblue',
-    'dimgray', 'dimgrey', 'dodgerblue', 'firebrick', 'floralwhite',
-    'forestgreen', 'fuchsia', 'gainsboro', 'ghostwhite', 'gold', 'goldenrod',
-    'gray', 'green', 'greenyellow', 'grey', 'honeydew', 'hotpink',
-    'indianred', 'indigo', 'ivory', 'khaki', 'lavender', 'lavenderblush',
-    'lawngreen', 'lemonchiffon', 'lightblue', 'lightcoral', 'lightcyan',
-    'lightgoldenrodyellow', 'lightgray', 'lightgreen', 'lightgrey',
-    'lightpink', 'lightsalmon', 'lightseagreen', 'lightskyblue',
-    'lightslategray', 'lightslategrey', 'lightsteelblue', 'lightyellow',
-    'lime', 'limegreen', 'linen', 'magenta', 'maroon', 'mediumaquamarine',
-    'mediumblue', 'mediumorchid', 'mediumpurple', 'mediumseagreen',
-    'mediumslateblue', 'mediumspringgreen', 'mediumturquoise',
-    'mediumvioletred', 'midnightblue', 'mintcream', 'mistyrose', 'moccasin',
-    'navajowhite', 'navy', 'oldlace', 'olive', 'olivedrab', 'orange',
-    'orangered', 'orchid', 'palegoldenrod', 'palegreen', 'paleturquoise',
-    'palevioletred', 'papayawhip', 'peachpuff', 'peru', 'pink', 'plum',
-    'powderblue', 'purple', 'red', 'rosybrown', 'royalblue', 'saddlebrown',
-    'salmon', 'sandybrown', 'seagreen', 'seashell', 'sienna', 'silver',
-    'skyblue', 'slateblue', 'slategray', 'slategrey', 'snow', 'springgreen',
-    'steelblue', 'tan', 'teal', 'thistle', 'tomato', 'turquoise', 'violet',
-    'wheat', 'white', 'whitesmoke', 'yellow', 'yellowgreen'
+    'aliceblue',
+    'antiquewhite',
+    'aqua',
+    'aquamarine',
+    'azure',
+    'beige',
+    'bisque',
+    'black',
+    'blanchedalmond',
+    'blue',
+    'blueviolet',
+    'brown',
+    'burlywood',
+    'cadetblue',
+    'chartreuse',
+    'chocolate',
+    'coral',
+    'cornflowerblue',
+    'cornsilk',
+    'crimson',
+    'cyan',
+    'darkblue',
+    'darkcyan',
+    'darkgoldenrod',
+    'darkgray',
+    'darkgreen',
+    'darkgrey',
+    'darkkhaki',
+    'darkmagenta',
+    'darkolivegreen',
+    'darkorange',
+    'darkorchid',
+    'darkred',
+    'darksalmon',
+    'darkseagreen',
+    'darkslateblue',
+    'darkslategray',
+    'darkslategrey',
+    'darkturquoise',
+    'darkviolet',
+    'deeppink',
+    'deepskyblue',
+    'dimgray',
+    'dimgrey',
+    'dodgerblue',
+    'firebrick',
+    'floralwhite',
+    'forestgreen',
+    'fuchsia',
+    'gainsboro',
+    'ghostwhite',
+    'gold',
+    'goldenrod',
+    'gray',
+    'green',
+    'greenyellow',
+    'grey',
+    'honeydew',
+    'hotpink',
+    'indianred',
+    'indigo',
+    'ivory',
+    'khaki',
+    'lavender',
+    'lavenderblush',
+    'lawngreen',
+    'lemonchiffon',
+    'lightblue',
+    'lightcoral',
+    'lightcyan',
+    'lightgoldenrodyellow',
+    'lightgray',
+    'lightgreen',
+    'lightgrey',
+    'lightpink',
+    'lightsalmon',
+    'lightseagreen',
+    'lightskyblue',
+    'lightslategray',
+    'lightslategrey',
+    'lightsteelblue',
+    'lightyellow',
+    'lime',
+    'limegreen',
+    'linen',
+    'magenta',
+    'maroon',
+    'mediumaquamarine',
+    'mediumblue',
+    'mediumorchid',
+    'mediumpurple',
+    'mediumseagreen',
+    'mediumslateblue',
+    'mediumspringgreen',
+    'mediumturquoise',
+    'mediumvioletred',
+    'midnightblue',
+    'mintcream',
+    'mistyrose',
+    'moccasin',
+    'navajowhite',
+    'navy',
+    'oldlace',
+    'olive',
+    'olivedrab',
+    'orange',
+    'orangered',
+    'orchid',
+    'palegoldenrod',
+    'palegreen',
+    'paleturquoise',
+    'palevioletred',
+    'papayawhip',
+    'peachpuff',
+    'peru',
+    'pink',
+    'plum',
+    'powderblue',
+    'purple',
+    'red',
+    'rosybrown',
+    'royalblue',
+    'saddlebrown',
+    'salmon',
+    'sandybrown',
+    'seagreen',
+    'seashell',
+    'sienna',
+    'silver',
+    'skyblue',
+    'slateblue',
+    'slategray',
+    'slategrey',
+    'snow',
+    'springgreen',
+    'steelblue',
+    'tan',
+    'teal',
+    'thistle',
+    'tomato',
+    'turquoise',
+    'violet',
+    'wheat',
+    'white',
+    'whitesmoke',
+    'yellow',
+    'yellowgreen',
 }
 
 _PHONE_E164_RE = re.compile(r'^\+[1-9]\d{6,14}$')
@@ -130,7 +249,7 @@ def _is_prime(n):
         return True
     if n % 2 == 0:
         return False
-    for i in range(3, int(n ** 0.5) + 1, 2):
+    for i in range(3, int(n**0.5) + 1, 2):
         if n % i == 0:
             return False
     return True
@@ -147,10 +266,10 @@ def _is_valid_color(value, fmt=None):
     if fmt == 'named':
         return s.lower() in _NAMED_COLORS
     return (
-        bool(_HEX_COLOR_RE.match(s)) or
-        bool(_RGB_COLOR_RE.match(s)) or
-        bool(_HSL_COLOR_RE.match(s)) or
-        s.lower() in _NAMED_COLORS
+        bool(_HEX_COLOR_RE.match(s))
+        or bool(_RGB_COLOR_RE.match(s))
+        or bool(_HSL_COLOR_RE.match(s))
+        or s.lower() in _NAMED_COLORS
     )
 
 
@@ -160,6 +279,7 @@ def _is_valid_phone(value, fmt=None):
         return bool(_PHONE_E164_RE.match(s))
     try:
         import phonenumbers
+
         try:
             parsed = phonenumbers.parse(s, None)
             return phonenumbers.is_valid_number(parsed)
@@ -176,8 +296,7 @@ def _has_nested_rules(rules):
     """Detect whether any rules contain nested field definitions."""
     if isinstance(rules, list):
         return any(
-            isinstance(r, dict) and ('fields' in r or 'items' in r)
-            for r in rules
+            isinstance(r, dict) and ('fields' in r or 'items' in r) for r in rules
         )
     if isinstance(rules, dict):
         if 'keys' in rules:
@@ -190,8 +309,16 @@ def _has_nested_rules(rules):
 
 
 class Validator:
-    def __init__(self, native_types, basic_types, extended_types,
-                 raise_exceptions, mutate=False, nested=False, **kwds):
+    def __init__(
+        self,
+        native_types,
+        basic_types,
+        extended_types,
+        raise_exceptions,
+        mutate=False,
+        nested=False,
+        **kwds,
+    ):
         self.errors = []
         self.error_keys = []
         self.log_errors = False
@@ -259,8 +386,14 @@ class Validator:
             if value is None and current_rules.get('nullable', False):
                 return True
             return self.is_type(
-                current_rules.get('type'), value, current_rules,
-                True, '', key, current_rules.get('strict', False), path=path
+                current_rules.get('type'),
+                value,
+                current_rules,
+                True,
+                '',
+                key,
+                current_rules.get('strict', False),
+                path=path,
             )
 
         def apply_transform(value, rules, full_data=None):
@@ -281,9 +414,7 @@ class Validator:
             if not fields or not isinstance(value, dict):
                 return value, True
             nested_rules = list(fields.values())
-            nested_data = OrderedDict(
-                (k, value.get(k)) for k in fields.keys()
-            )
+            nested_data = OrderedDict((k, value.get(k)) for k in fields.keys())
             nested_result = self.validate_object(
                 nested_data, nested_rules, {}, parent_path=path
             )
@@ -303,9 +434,14 @@ class Validator:
                         all_ok = False
                 else:
                     if not self.is_type(
-                        items_rule.get('type'), item, item_rules,
-                        True, '', '', item_rules.get('strict', False),
-                        path=item_path
+                        items_rule.get('type'),
+                        item,
+                        item_rules,
+                        True,
+                        '',
+                        '',
+                        item_rules.get('strict', False),
+                        path=item_path,
                     ):
                         all_ok = False
                     else:
@@ -333,30 +469,48 @@ class Validator:
                 current_rules = add_strict_rule(rules[index])
                 transformed_value = apply_transform(value, current_rules, full_data)
 
-                if not self._check_depends_on(current_rules, key, transformed_value, full_data):
-                    self.transformed_data.append(transformed_value if self.mutate else value)
+                if not self._check_depends_on(
+                    current_rules, key, transformed_value, full_data
+                ):
+                    self.transformed_data.append(
+                        transformed_value if self.mutate else value
+                    )
                     continue
 
                 if current_rules.get('fields'):
                     handle_nested_dict(transformed_value, current_rules, path)
-                    self.transformed_data.append(transformed_value if self.mutate else value)
+                    self.transformed_data.append(
+                        transformed_value if self.mutate else value
+                    )
                     continue
 
                 if current_rules.get('items'):
                     handle_nested_list(transformed_value, current_rules, path)
-                    self.transformed_data.append(transformed_value if self.mutate else value)
+                    self.transformed_data.append(
+                        transformed_value if self.mutate else value
+                    )
                     continue
 
-                if not value_is_of_type(current_rules, key, transformed_value, path=path):
-                    self.transformed_data.append(transformed_value if self.mutate else value)
+                if not value_is_of_type(
+                    current_rules, key, transformed_value, path=path
+                ):
+                    self.transformed_data.append(
+                        transformed_value if self.mutate else value
+                    )
                     continue
 
                 self.validate_rule(key, transformed_value, current_rules, path=path)
-                self.transformed_data.append(transformed_value if self.mutate else value)
+                self.transformed_data.append(
+                    transformed_value if self.mutate else value
+                )
 
         elif isinstance(data, (list, tuple)):
             for count, value in enumerate(data):
-                path = self._build_path(parent_path, '', index=count) if self.nested else ''
+                path = (
+                    self._build_path(parent_path, '', index=count)
+                    if self.nested
+                    else ''
+                )
 
                 if not self.nested:
                     if self.group_errors:
@@ -367,20 +521,30 @@ class Validator:
 
                 if current_rules.get('fields'):
                     handle_nested_dict(transformed_value, current_rules, path)
-                    self.transformed_data.append(transformed_value if self.mutate else value)
+                    self.transformed_data.append(
+                        transformed_value if self.mutate else value
+                    )
                     continue
 
                 if current_rules.get('items'):
                     handle_nested_list(transformed_value, current_rules, path)
-                    self.transformed_data.append(transformed_value if self.mutate else value)
+                    self.transformed_data.append(
+                        transformed_value if self.mutate else value
+                    )
                     continue
 
-                if not value_is_of_type(current_rules, '', transformed_value, path=path):
-                    self.transformed_data.append(transformed_value if self.mutate else value)
+                if not value_is_of_type(
+                    current_rules, '', transformed_value, path=path
+                ):
+                    self.transformed_data.append(
+                        transformed_value if self.mutate else value
+                    )
                     continue
 
                 self.validate_rule('', transformed_value, current_rules, path=path)
-                self.transformed_data.append(transformed_value if self.mutate else value)
+                self.transformed_data.append(
+                    transformed_value if self.mutate else value
+                )
 
         elif isinstance(data, str):
             self.group_errors = False
@@ -391,7 +555,8 @@ class Validator:
 
         else:
             raise TypeError(
-                'the data parameter should be a string, list, tuple, or dict')
+                'the data parameter should be a string, list, tuple, or dict'
+            )
 
         result['errors'] = self.errors
 
@@ -437,7 +602,9 @@ class Validator:
         key_val = error_key.value if hasattr(error_key, 'value') else error_key
         raw_error = errm.get(f'field_{key_val}', '') if field else ''
         raw_error = raw_error or errm.get(key_val, '') or errm['no_error_message']
-        custom_message = rules.get(f'{rule_key}-message', '') or rules.get('message', '')
+        custom_message = rules.get(f'{rule_key}-message', '') or rules.get(
+            'message', ''
+        )
         return custom_message or raw_error
 
     def append_error(self, path='', **kwargs):
@@ -486,7 +653,9 @@ class Validator:
                         self.append_error(path=path)
                 elif self._type == 'dict':
                     self.error_key = ErrorKeys.MISSING_REQUIRED_KEYS
-                    if not all(val in set(self.data_value.keys()) for val in self.rule_value):
+                    if not all(
+                        val in set(self.data_value.keys()) for val in self.rule_value
+                    ):
                         self.append_error(path=path)
                 else:
                     self.error_key = ErrorKeys.MISSING_REQUIRED_VALUES
@@ -534,33 +703,62 @@ class Validator:
         if self._type == 'str':
             self.error_key = ErrorKeys.STRING_NOT_IN_RANGE
             min_len = 0 if self.rule_value[0] == 'any' else self.rule_value[0]
-            max_len = float('inf') if self.rule_value[1] == 'any' else self.rule_value[1]
-            if not (len(self.data_value) >= min_len and len(self.data_value) <= max_len):
+            max_len = (
+                float('inf') if self.rule_value[1] == 'any' else self.rule_value[1]
+            )
+            if not (
+                len(self.data_value) >= min_len and len(self.data_value) <= max_len
+            ):
                 self.append_error(path=path)
 
         elif self._type == 'date':
             self.error_key = ErrorKeys.DATE_NOT_IN_RANGE
-            cast_date = self.data_value if isinstance(
-                self.data_value, datetime) else parse_date(self.data_value)
+            cast_date = (
+                self.data_value
+                if isinstance(self.data_value, datetime)
+                else parse_date(self.data_value)
+            )
             if isinstance(self.data_value, datetime):
-                min_date = self.data_value if self.rule_value[0] == 'any' else parse_date(self.rule_value[0])
-                max_date = self.data_value if self.rule_value[1] == 'any' else parse_date(self.rule_value[1])
+                min_date = (
+                    self.data_value
+                    if self.rule_value[0] == 'any'
+                    else parse_date(self.rule_value[0])
+                )
+                max_date = (
+                    self.data_value
+                    if self.rule_value[1] == 'any'
+                    else parse_date(self.rule_value[1])
+                )
             else:
-                min_date = parse_date(self.data_value) if self.rule_value[0] == 'any' else parse_date(self.rule_value[0])
-                max_date = parse_date(self.data_value) if self.rule_value[1] == 'any' else parse_date(self.rule_value[1])
+                min_date = (
+                    parse_date(self.data_value)
+                    if self.rule_value[0] == 'any'
+                    else parse_date(self.rule_value[0])
+                )
+                max_date = (
+                    parse_date(self.data_value)
+                    if self.rule_value[1] == 'any'
+                    else parse_date(self.rule_value[1])
+                )
             if not (cast_date >= min_date and cast_date <= max_date):
                 self.append_error(path=path)
 
         elif self._type in ('list', 'tuple'):
             self.error_key = ErrorKeys.LIST_OR_TUPLE_NOT_IN_RANGE
-            if not (len(self.data_value) >= self.rule_value[0] and
-                    len(self.data_value) <= self.rule_value[1]):
+            if not (
+                len(self.data_value) >= self.rule_value[0]
+                and len(self.data_value) <= self.rule_value[1]
+            ):
                 self.append_error(path=path)
 
         elif self._type in ('int', 'float', 'even', 'odd'):
             self.error_key = ErrorKeys.NUMBER_NOT_IN_RANGE
-            min_value = float('-inf') if self.rule_value[0] == 'any' else self.rule_value[0]
-            max_value = float('inf') if self.rule_value[1] == 'any' else self.rule_value[1]
+            min_value = (
+                float('-inf') if self.rule_value[0] == 'any' else self.rule_value[0]
+            )
+            max_value = (
+                float('inf') if self.rule_value[1] == 'any' else self.rule_value[1]
+            )
             cast_value = literal_eval(str(self.data_value))
             if not (cast_value >= float(min_value) and cast_value <= float(max_value)):
                 self.append_error(path=path)
@@ -613,8 +811,18 @@ class Validator:
 
         rule_set = set(rule_map.keys())
         non_rule_keys = {
-            'type', 'strict', 'message', 'nullable', 'transform', 'mutate',
-            'depends_on', 'object', 'format', 'region', 'fields', 'items'
+            'type',
+            'strict',
+            'message',
+            'nullable',
+            'transform',
+            'mutate',
+            'depends_on',
+            'object',
+            'format',
+            'region',
+            'fields',
+            'items',
         }
 
         def is_message_key(k):
@@ -631,7 +839,7 @@ class Validator:
                         data_key=key,
                         data_value=value,
                         all_rules=rules,
-                        path=path
+                        path=path,
                     )
             except ValidationError:
                 raise
@@ -644,8 +852,17 @@ class Validator:
                         logging.warning(str(ex))
                     self.append_error(path=path)
 
-    def is_type(self, data_type, data, rules, append_errors=False,
-                message='', field_name='', strict=False, path=''):
+    def is_type(
+        self,
+        data_type,
+        data,
+        rules,
+        append_errors=False,
+        message='',
+        field_name='',
+        strict=False,
+        path='',
+    ):
 
         status = False
 
@@ -692,16 +909,24 @@ class Validator:
                 email_re = re.compile(
                     r"""^(([^<>()\[\]\\.,;:\s@\"]+(\.[^<>()\[\]\\.,;:\s@\"]+)*)
                 |(\".+\"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])
-                |(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$""", re.VERBOSE)
+                |(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$""",
+                    re.VERBOSE,
+                )
                 if email_re.match(str(data)) is None:
                     append_type_error(ErrorKeys.INVALID_EMAIL)
 
             elif data_type == 'even':
-                if not (self.is_type('int', data, rules, strict=strict) and int(data) % 2 == 0):
+                if not (
+                    self.is_type('int', data, rules, strict=strict)
+                    and int(data) % 2 == 0
+                ):
                     append_type_error(ErrorKeys.NOT_EVEN)
 
             elif data_type == 'odd':
-                if not (self.is_type('int', data, rules, strict=strict) and int(data) % 2 == 1):
+                if not (
+                    self.is_type('int', data, rules, strict=strict)
+                    and int(data) % 2 == 1
+                ):
                     append_type_error(ErrorKeys.NOT_ODD)
 
             elif data_type == 'prime':
@@ -765,12 +990,21 @@ class Validator:
 
         return status
 
-    def format_error(self, error_key, error_values=[], rules={}, field='',
-                     rule_key='', append_errors=True,
-                     raised_exception_type=ValidationError):
+    def format_error(
+        self,
+        error_key,
+        error_values=[],
+        rules={},
+        field='',
+        rule_key='',
+        append_errors=True,
+        raised_exception_type=ValidationError,
+    ):
         raw_error = errm.get(f'field_{error_key}', '') if field else ''
         raw_error = raw_error or errm.get(error_key, '') or errm['no_error_message']
-        custom_message = rules.get(f'{rule_key}-message', '') or rules.get('message', '')
+        custom_message = rules.get(f'{rule_key}-message', '') or rules.get(
+            'message', ''
+        )
 
         if error_key == ErrorKeys.INVALID_TYPE:
             ev = error_values

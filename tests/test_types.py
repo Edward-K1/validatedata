@@ -120,12 +120,16 @@ class TestTypes(BaseTest):
 
         # rule[1]: length + range(any-bound) + options + excludes + startswith + endswith + contains
         self.assertTrue(validate_data(['validate'], self.all_str_rules[1]).ok)
-        self.assertFalse(validate_data(['neo'], self.all_str_rules[1]).ok)       # excluded
-        self.assertFalse(validate_data(['wrongval'], self.all_str_rules[1]).ok)  # not in options
+        self.assertFalse(validate_data(['neo'], self.all_str_rules[1]).ok)  # excluded
+        self.assertFalse(
+            validate_data(['wrongval'], self.all_str_rules[1]).ok
+        )  # not in options
 
         # rule[2]: regex expression + range with 'any' lower bound
         self.assertTrue(validate_data(['12345678'], self.all_str_rules[2]).ok)
-        self.assertFalse(validate_data(['abc'], self.all_str_rules[2]).ok)       # fails regex
+        self.assertFalse(
+            validate_data(['abc'], self.all_str_rules[2]).ok
+        )  # fails regex
 
     def test_dict(self):
         dict1 = {'name': 'james', 'age': 22, 'city': 'kampala'}
@@ -144,8 +148,10 @@ class TestTypes(BaseTest):
     def test_list(self):
         result1 = validate_data([[5, 6, 9, 10]], self.all_list_rules[0])
         result2 = validate_data([[5, 6, 9, 10]], self.all_list_rules[1])
-        result3 = validate_data([[1, 2, 3]], self.all_list_rules[1])    # wrong length + missing values
-        result4 = validate_data(['notalist'], self.all_list_rules[0])   # not a list
+        result3 = validate_data(
+            [[1, 2, 3]], self.all_list_rules[1]
+        )  # wrong length + missing values
+        result4 = validate_data(['notalist'], self.all_list_rules[0])  # not a list
 
         self.assertTrue(result1.ok)
         self.assertTrue(result2.ok)
@@ -153,8 +159,8 @@ class TestTypes(BaseTest):
         self.assertFalse(result4.ok)
 
     def test_regex(self):
-        result1 = validate_data('hello', self.all_regex_rules[0])   # matches \w{4,}
-        result2 = validate_data('hi', self.all_regex_rules[0])      # too short
+        result1 = validate_data('hello', self.all_regex_rules[0])  # matches \w{4,}
+        result2 = validate_data('hi', self.all_regex_rules[0])  # too short
 
         self.assertTrue(result1.ok)
         self.assertFalse(result2.ok)
@@ -164,7 +170,9 @@ class TestTypes(BaseTest):
         result1 = validate_data([{2, 3}], self.all_set_rules[0])
         result2 = validate_data(['wrong'], self.all_set_rules[0])
         result3 = validate_data([{5, 6, 9}], self.all_set_rules[1])
-        result4 = validate_data([{1, 2, 8}], self.all_set_rules[1])  # contains excluded value 8
+        result4 = validate_data(
+            [{1, 2, 8}], self.all_set_rules[1]
+        )  # contains excluded value 8
 
         self.assertTrue(result1.ok)
         self.assertFalse(result2.ok)
@@ -174,8 +182,8 @@ class TestTypes(BaseTest):
     def test_tuple(self):
         result1 = validate_data([(5, 6, 9, 10)], self.all_tuple_rules[0])
         result2 = validate_data([(5, 6, 9, 10)], self.all_tuple_rules[1])
-        result3 = validate_data([(1, 2, 3)], self.all_tuple_rules[1])   # wrong length
-        result4 = validate_data(['notuple'], self.all_tuple_rules[0])   # not a tuple
+        result3 = validate_data([(1, 2, 3)], self.all_tuple_rules[1])  # wrong length
+        result4 = validate_data(['notuple'], self.all_tuple_rules[0])  # not a tuple
 
         self.assertTrue(result1.ok)
         self.assertTrue(result2.ok)
@@ -188,7 +196,9 @@ class TestTypes(BaseTest):
 
         result1 = validate_data([person], self.all_object_rules[0])  # correct type
         result2 = validate_data([animal], self.all_object_rules[0])  # wrong type
-        result3 = validate_data(['string'], self.all_object_rules[0])  # wrong type (primitive)
+        result3 = validate_data(
+            ['string'], self.all_object_rules[0]
+        )  # wrong type (primitive)
 
         self.assertTrue(result1.ok)
         self.assertFalse(result2.ok)

@@ -35,19 +35,39 @@ class TestCustomMessages(BaseTest):
         self.assertIn('must be a whole number', result.errors[0])
 
     def test_rule_specific_message_key(self):
-        rule = [{'type': 'int', 'range': (18, 'any'), 'range-message': 'must be 18 or older'}]
+        rule = [
+            {
+                'type': 'int',
+                'range': (18, 'any'),
+                'range-message': 'must be 18 or older',
+            }
+        ]
         result = validate_data([10], rule)
         self.assertFalse(result.ok)
         self.assertIn('must be 18 or older', result.errors[0])
 
     def test_expression_message_key(self):
-        rule = [{'type': 'str', 'expression': r'^\d{4}$', 'expression-message': 'must be 4 digits'}]
+        rule = [
+            {
+                'type': 'str',
+                'expression': r'^\d{4}$',
+                'expression-message': 'must be 4 digits',
+            }
+        ]
         result = validate_data(['abc'], rule)
         self.assertFalse(result.ok)
         self.assertIn('must be 4 digits', result.errors[0])
 
     def test_custom_message_in_dict_rule(self):
-        rule = {'keys': {'age': {'type': 'int', 'range': (18, 'any'), 'range-message': 'must be 18+'}}}
+        rule = {
+            'keys': {
+                'age': {
+                    'type': 'int',
+                    'range': (18, 'any'),
+                    'range-message': 'must be 18+',
+                }
+            }
+        }
         result = validate_data({'age': 10}, rule)
         self.assertFalse(result.ok)
         self.assertIn('must be 18+', result.errors[0])
@@ -78,10 +98,13 @@ class TestMutateAndTransform(BaseTest):
         data = OrderedDict([('base', 100), ('multiplier', 3)])
         rules = [
             {'type': 'int'},
-            {'type': 'int', 'transform': {
-                'func': lambda v, d: v * d.get('base', 1),
-                'pass_data': True
-            }}
+            {
+                'type': 'int',
+                'transform': {
+                    'func': lambda v, d: v * d.get('base', 1),
+                    'pass_data': True,
+                },
+            },
         ]
         result = validate_data(data, rules, mutate=True)
         self.assertTrue(result.ok)
@@ -111,7 +134,11 @@ class TestDependsOn(BaseTest):
         data = OrderedDict([('role', 'admin'), ('secret', 'abc123')])
         rules = [
             {'type': 'str'},
-            {'type': 'str', 'length': 6, 'depends_on': {'field': 'role', 'value': 'admin'}}
+            {
+                'type': 'str',
+                'length': 6,
+                'depends_on': {'field': 'role', 'value': 'admin'},
+            },
         ]
         self.assertTrue(validate_data(data, rules).ok)
 
@@ -120,7 +147,11 @@ class TestDependsOn(BaseTest):
         data = OrderedDict([('role', 'admin'), ('secret', 'x')])
         rules = [
             {'type': 'str'},
-            {'type': 'str', 'length': 6, 'depends_on': {'field': 'role', 'value': 'admin'}}
+            {
+                'type': 'str',
+                'length': 6,
+                'depends_on': {'field': 'role', 'value': 'admin'},
+            },
         ]
         self.assertFalse(validate_data(data, rules).ok)
 
@@ -129,7 +160,11 @@ class TestDependsOn(BaseTest):
         data = OrderedDict([('role', 'user'), ('secret', 'x')])
         rules = [
             {'type': 'str'},
-            {'type': 'str', 'length': 6, 'depends_on': {'field': 'role', 'value': 'admin'}}
+            {
+                'type': 'str',
+                'length': 6,
+                'depends_on': {'field': 'role', 'value': 'admin'},
+            },
         ]
         self.assertTrue(validate_data(data, rules).ok)
 
@@ -138,7 +173,13 @@ class TestDependsOn(BaseTest):
         data = OrderedDict([('has_discount', True), ('code', 'SAVE10')])
         rules = [
             {'type': 'bool'},
-            {'type': 'str', 'depends_on': {'field': 'has_discount', 'condition': lambda v: v is True}}
+            {
+                'type': 'str',
+                'depends_on': {
+                    'field': 'has_discount',
+                    'condition': lambda v: v is True,
+                },
+            },
         ]
         self.assertTrue(validate_data(data, rules).ok)
 
@@ -146,7 +187,14 @@ class TestDependsOn(BaseTest):
         data = OrderedDict([('has_discount', False), ('code', '')])
         rules = [
             {'type': 'bool'},
-            {'type': 'str', 'length': 6, 'depends_on': {'field': 'has_discount', 'condition': lambda v: v is True}}
+            {
+                'type': 'str',
+                'length': 6,
+                'depends_on': {
+                    'field': 'has_discount',
+                    'condition': lambda v: v is True,
+                },
+            },
         ]
         # condition is False, so the 'code' field is skipped entirely
         self.assertTrue(validate_data(data, rules).ok)
@@ -156,12 +204,22 @@ class TestNestedFields(BaseTest):
 
     def test_nested_dict_valid(self):
         data = OrderedDict([('user', {'name': 'alice', 'age': 30})])
-        rules = [{'type': 'dict', 'fields': {'name': {'type': 'str'}, 'age': {'type': 'int'}}}]
+        rules = [
+            {
+                'type': 'dict',
+                'fields': {'name': {'type': 'str'}, 'age': {'type': 'int'}},
+            }
+        ]
         self.assertTrue(validate_data(data, rules).ok)
 
     def test_nested_dict_wrong_field_type(self):
         data = OrderedDict([('user', {'name': 123, 'age': 30})])
-        rules = [{'type': 'dict', 'fields': {'name': {'type': 'str'}, 'age': {'type': 'int'}}}]
+        rules = [
+            {
+                'type': 'dict',
+                'fields': {'name': {'type': 'str'}, 'age': {'type': 'int'}},
+            }
+        ]
         result = validate_data(data, rules)
         self.assertFalse(result.ok)
         # path should be included in the error message
@@ -169,7 +227,12 @@ class TestNestedFields(BaseTest):
 
     def test_nested_dict_multiple_invalid_fields(self):
         data = OrderedDict([('user', {'name': 123, 'age': 'old'})])
-        rules = [{'type': 'dict', 'fields': {'name': {'type': 'str'}, 'age': {'type': 'int'}}}]
+        rules = [
+            {
+                'type': 'dict',
+                'fields': {'name': {'type': 'str'}, 'age': {'type': 'int'}},
+            }
+        ]
         result = validate_data(data, rules)
         self.assertFalse(result.ok)
         self.assertTrue(any('user.name' in e for e in result.errors))
@@ -205,25 +268,49 @@ class TestNestedItems(BaseTest):
 
     def test_nested_list_of_dicts(self):
         """Items can themselves have nested fields."""
-        data = OrderedDict([('users', [
-            {'name': 'alice', 'age': 30},
-            {'name': 'bob', 'age': 25},
-        ])])
-        rules = [{'type': 'list', 'items': {
-            'type': 'dict',
-            'fields': {'name': {'type': 'str'}, 'age': {'type': 'int'}}
-        }}]
+        data = OrderedDict(
+            [
+                (
+                    'users',
+                    [
+                        {'name': 'alice', 'age': 30},
+                        {'name': 'bob', 'age': 25},
+                    ],
+                )
+            ]
+        )
+        rules = [
+            {
+                'type': 'list',
+                'items': {
+                    'type': 'dict',
+                    'fields': {'name': {'type': 'str'}, 'age': {'type': 'int'}},
+                },
+            }
+        ]
         self.assertTrue(validate_data(data, rules).ok)
 
     def test_nested_list_of_dicts_invalid(self):
-        data = OrderedDict([('users', [
-            {'name': 'alice', 'age': 30},
-            {'name': 999, 'age': 25},   # name should be str
-        ])])
-        rules = [{'type': 'list', 'items': {
-            'type': 'dict',
-            'fields': {'name': {'type': 'str'}, 'age': {'type': 'int'}}
-        }}]
+        data = OrderedDict(
+            [
+                (
+                    'users',
+                    [
+                        {'name': 'alice', 'age': 30},
+                        {'name': 999, 'age': 25},  # name should be str
+                    ],
+                )
+            ]
+        )
+        rules = [
+            {
+                'type': 'list',
+                'items': {
+                    'type': 'dict',
+                    'fields': {'name': {'type': 'str'}, 'age': {'type': 'int'}},
+                },
+            }
+        ]
         result = validate_data(data, rules)
         self.assertFalse(result.ok)
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "validatedata"
-version = "0.2.1"
+version = "0.2.6"
 authors = [
   { name="Edward Kigozi", email="edwardinbytes@gmail.com" },
 ]
