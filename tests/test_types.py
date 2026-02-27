@@ -10,10 +10,11 @@ class TestTypes(BaseTest):
         result2 = validate_data([False], self.all_bool_rules[0])
         result3 = validate_data(['nope'], self.all_bool_rules[0])
 
-        self.assertEqual(result1.ok, True)
-        self.assertEqual(result2.ok, True)
-        self.assertEqual(result3.ok, False)
-
+        self.assertTrue(result1.ok)
+        self.assertTrue(result2.ok)
+        self.assertFalse(result3.ok)
+        # error message is already formatted (e.g. "Expected value of type bool, found str")
+        self.assertTrue(any('bool' in msg for msg in result3.errors[0]))
 
     def test_date(self):
         result1 = validate_data('23-Oct-2000', self.all_date_rules[0])
@@ -183,6 +184,13 @@ class TestTypes(BaseTest):
 
     def test_object(self):
         person = self.person_class()
-        result1 = validate_data([person], self.all_object_rules[0])
+        animal = self.animal_class()
 
-        self.assertEqual(result1.ok, True)
+        result1 = validate_data([person], self.all_object_rules[0])  # correct type
+        result2 = validate_data([animal], self.all_object_rules[0])  # wrong type
+        result3 = validate_data(['string'], self.all_object_rules[0])  # wrong type (primitive)
+
+        self.assertTrue(result1.ok)
+        self.assertFalse(result2.ok)
+        self.assertFalse(result3.ok)
+        self.assertIn(error_messages['invalid_object'], result2.errors[0])
