@@ -1,6 +1,6 @@
 from collections import OrderedDict
 from functools import wraps
-from inspect import getfullargspec
+from inspect import getfullargspec, iscoroutinefunction
 
 from .validator import Validator, _has_nested_rules
 
@@ -37,65 +37,91 @@ class EmptyObject:
 EMPTY = EmptyObject()
 
 
+def _build_func_data(func, obj, args, kwargs, is_class=False):
+    """Extract and align positional/keyword arguments into an OrderedDict for validation."""
+    func_data = OrderedDict()
+    func_defaults = OrderedDict()
+    func_defn = getfullargspec(func)
+    obj_is_cls = True if (is_class or (func_defn.args and func_defn.args[0] == 'self')) else False
+    clean_params = func_defn.args[1:] if obj_is_cls else func_defn.args
+
+    func_data.update(zip(clean_params, [EMPTY] * len(clean_params)))
+
+    if func_defn.defaults:
+        defaults_dict = OrderedDict(
+            zip(clean_params[-len(func_defn.defaults):], func_defn.defaults)
+        )
+        func_data.update(defaults_dict)
+        func_defaults.update(defaults_dict)
+
+    if not obj_is_cls:
+        func_data[clean_params[0]] = obj
+
+    if args:
+        if obj_is_cls:
+            func_data.update(zip(clean_params, args))
+        else:
+            func_data.update(zip(clean_params[1:], args))
+
+    if kwargs:
+        func_data.update(
+            zip(
+                [k for k in kwargs.keys() if k in set(func_data.keys())],
+                kwargs.values(),
+            )
+        )
+
+    return func_data, func_defaults, obj_is_cls
+
+
 def validate(rule, raise_exceptions=False, is_class=False, mutate=False, **kwds):
     def decorator(func):
-        @wraps(func)
-        def wrapper(obj=EMPTY, *args, **kwargs):
-            func_data = OrderedDict()
-            func_defaults = OrderedDict()
-            func_defn = getfullargspec(func)
-            obj_is_cls = (
-                True if (is_class == True or func_defn.args[0] == 'self') else False
-            )
-            clean_params = func_defn.args[1:] if obj_is_cls else func_defn.args
-
-            func_data.update(
-                zip(clean_params, [EMPTY for x in range(len(clean_params))])
-            )
-
-            if func_defn.defaults:
-                defaults_dict = OrderedDict(
-                    zip(clean_params[-len(func_defn.defaults) :], func_defn.defaults)
+        if iscoroutinefunction(func):
+            @wraps(func)
+            async def wrapper(obj=EMPTY, *args, **kwargs):
+                func_data, func_defaults, obj_is_cls = _build_func_data(
+                    func, obj, args, kwargs, is_class
                 )
-                func_data.update(defaults_dict)
-                func_defaults.update(defaults_dict)
-
-            if not obj_is_cls:
-                func_data[clean_params[0]] = obj
-
-            if args:
-                if obj_is_cls:
-                    func_data.update(zip(clean_params, args))
-                else:
-                    func_data.update(zip(clean_params[1:], args))
-
-            if kwargs:
-                func_data.update(
-                    zip(
-                        [k for k in kwargs.keys() if k in set(func_data.keys())],
-                        kwargs.values(),
-                    )
+                result = validate_data(
+                    func_data, rule, raise_exceptions, func_defaults, mutate=mutate, **kwds
                 )
-
-            result = validate_data(
-                func_data, rule, raise_exceptions, func_defaults, mutate=mutate, **kwds
-            )
-
-            if result.ok:
-                if mutate and hasattr(result, 'data') and result.data:
-                    # pass transformed values to the function
-                    transformed = result.data
-                    if obj_is_cls:
-                        return func(obj, *transformed, **kwargs)
+                if result.ok:
+                    if mutate and hasattr(result, 'data') and result.data:
+                        transformed = result.data
+                        if obj_is_cls:
+                            return await func(obj, *transformed, **kwargs)
+                        else:
+                            return await func(*transformed, **kwargs)
                     else:
-                        return func(*transformed, **kwargs)
+                        if isinstance(obj, EmptyObject):
+                            return await func(*args, **kwargs)
+                        else:
+                            return await func(obj, *args, **kwargs)
                 else:
-                    if isinstance(obj, EmptyObject):
-                        return func(*args, **kwargs)
+                    return {'errors': result.errors}
+        else:
+            @wraps(func)
+            def wrapper(obj=EMPTY, *args, **kwargs):
+                func_data, func_defaults, obj_is_cls = _build_func_data(
+                    func, obj, args, kwargs, is_class
+                )
+                result = validate_data(
+                    func_data, rule, raise_exceptions, func_defaults, mutate=mutate, **kwds
+                )
+                if result.ok:
+                    if mutate and hasattr(result, 'data') and result.data:
+                        transformed = result.data
+                        if obj_is_cls:
+                            return func(obj, *transformed, **kwargs)
+                        else:
+                            return func(*transformed, **kwargs)
                     else:
-                        return func(obj, *args, **kwargs)
-            else:
-                return {'errors': result.errors}
+                        if isinstance(obj, EmptyObject):
+                            return func(*args, **kwargs)
+                        else:
+                            return func(obj, *args, **kwargs)
+                else:
+                    return {'errors': result.errors}
 
         return wrapper
 
@@ -115,70 +141,61 @@ def validate_types(
     """
 
     def decorator(f):
-        @wraps(f)
-        def wrapper(obj=EMPTY, *args, **kwargs):
-            func_data = OrderedDict()
-            func_defaults = OrderedDict()
-            func_defn = getfullargspec(f)
-            func_annotations = OrderedDict(
-                (k, v) for k, v in func_defn.annotations.items() if k != 'return'
-            )
-            obj_is_cls = (
-                True if (is_class == True or func_defn.args[0] == 'self') else False
-            )
-            clean_params = func_defn.args[1:] if obj_is_cls else func_defn.args
+        func_defn = getfullargspec(f)
+        func_annotations = OrderedDict(
+            (k, v) for k, v in func_defn.annotations.items() if k != 'return'
+        )
+        rules = [
+            {'type': 'annotation', 'object': func_annotations[key]}
+            for key in func_annotations
+        ]
 
-            func_data.update(
-                zip(clean_params, [EMPTY for x in range(len(clean_params))])
-            )
-
-            if func_defn.defaults:
-                defaults_dict = OrderedDict(
-                    zip(clean_params[-len(func_defn.defaults) :], func_defn.defaults)
+        if iscoroutinefunction(f):
+            @wraps(f)
+            async def wrapper(obj=EMPTY, *args, **kwargs):
+                func_data, func_defaults, obj_is_cls = _build_func_data(
+                    f, obj, args, kwargs, is_class
                 )
-                func_data.update(defaults_dict)
-                func_defaults.update(defaults_dict)
-
-            if not obj_is_cls:
-                func_data[clean_params[0]] = obj
-
-            if args:
-                if obj_is_cls:
-                    func_data.update(zip(clean_params, args))
-                else:
-                    func_data.update(zip(clean_params[1:], args))
-
-            if kwargs:
-                func_data.update(
-                    zip(
-                        [k for k in kwargs.keys() if k in set(func_data.keys())],
-                        kwargs.values(),
-                    )
+                result = validate_data(
+                    func_data, rules, raise_exceptions, func_defaults, mutate=mutate, **kwds
                 )
-
-            rules = [
-                {'type': 'annotation', 'object': func_annotations[key]}
-                for key in func_annotations
-            ]
-
-            result = validate_data(
-                func_data, rules, raise_exceptions, func_defaults, mutate=mutate, **kwds
-            )
-
-            if result.ok:
-                if mutate and hasattr(result, 'data') and result.data:
-                    transformed = result.data
-                    if obj_is_cls:
-                        return f(obj, *transformed, **kwargs)
+                if result.ok:
+                    if mutate and hasattr(result, 'data') and result.data:
+                        transformed = result.data
+                        if obj_is_cls:
+                            return await f(obj, *transformed, **kwargs)
+                        else:
+                            return await f(*transformed, **kwargs)
                     else:
-                        return f(*transformed, **kwargs)
+                        if isinstance(obj, EmptyObject):
+                            return await f(*args, **kwargs)
+                        else:
+                            return await f(obj, *args, **kwargs)
                 else:
-                    if isinstance(obj, EmptyObject):
-                        return f(*args, **kwargs)
+                    return {'errors': result.errors}
+        else:
+            @wraps(f)
+            def wrapper(obj=EMPTY, *args, **kwargs):
+                func_data, func_defaults, obj_is_cls = _build_func_data(
+                    f, obj, args, kwargs, is_class
+                )
+                result = validate_data(
+                    func_data, rules, raise_exceptions, func_defaults, mutate=mutate, **kwds
+                )
+                if result.ok:
+                    if mutate and hasattr(result, 'data') and result.data:
+                        transformed = result.data
+                        if obj_is_cls:
+                            return f(obj, *transformed, **kwargs)
+                        else:
+                            return f(*transformed, **kwargs)
                     else:
-                        return f(obj, *args, **kwargs)
-            else:
-                return {'errors': result.errors}
+                        if isinstance(obj, EmptyObject):
+                            return f(*args, **kwargs)
+                        else:
+                            return f(obj, *args, **kwargs)
+                else:
+                    return {'errors': result.errors}
 
         return wrapper
 
