@@ -240,6 +240,211 @@ def validate_data(
     return result
 
 
+# ---------------------------------------------------------------------------
+# Pipe-syntax shorthand parser
+# ---------------------------------------------------------------------------
+
+_PIPE_BARE_KEYWORDS = frozenset({
+    'strict', 'nullable', 'unique',
+    'strip', 'lstrip', 'rstrip', 'lower', 'upper', 'title',
+})
+
+_PIPE_VALUE_KEYWORDS = frozenset({
+    'min:', 'max:', 'between:', 'in:', 'not_in:',
+    'starts_with:', 'ends_with:', 'contains:',
+    'format:', 're:', 'msg:',
+})
+
+_TRANSFORM_MAP = {
+    'strip':  str.strip,
+    'lstrip': str.lstrip,
+    'rstrip': str.rstrip,
+    'lower':  str.lower,
+    'upper':  str.upper,
+    'title':  str.title,
+}
+
+
+def _is_pipe_delimiter(s, pos):
+    """Return True if the | at pos is a recognised modifier boundary."""
+    rest = s[pos + 1:]
+    for kw in _PIPE_VALUE_KEYWORDS:
+        if rest.startswith(kw):
+            return True
+    for kw in _PIPE_BARE_KEYWORDS:
+        if rest.startswith(kw):
+            after = rest[len(kw):]
+            if after == '' or after[0] == '|':
+                return True
+    return False
+
+
+def _pipe_tokenize(s):
+    """Split s on | only where followed by a recognised modifier keyword.
+    The type token is always split at the first | unconditionally."""
+    first_pipe = s.find('|')
+    if first_pipe == -1:
+        return [s]
+
+    tokens = [s[:first_pipe]]
+    rest = s[first_pipe + 1:]
+    start = 0
+    pos = rest.find('|')
+    while pos != -1:
+        if _is_pipe_delimiter(rest, pos):
+            tokens.append(rest[start:pos])
+            start = pos + 1
+        pos = rest.find('|', pos + 1)
+    tokens.append(rest[start:])
+    return tokens
+
+
+def _coerce_range_val(v):
+    """Convert a range bound string to int, float, or leave as-is (dates, 'any')."""
+    if v == 'any':
+        return 'any'
+    try:
+        return float(v) if '.' in v else int(v)
+    except (ValueError, TypeError):
+        return v
+
+
+def _chain_transforms(fns):
+    def apply(v):
+        for fn in fns:
+            v = fn(v)
+        return v
+    return apply
+
+
+def _expand_pipe_rule(rule):
+    """Parse a pipe-syntax shorthand rule string into an expanded rule dict."""
+    tokens = _pipe_tokenize(rule)
+
+    # --- type token ---
+    type_token = tokens[0].strip()
+    all_types = set(BASIC_TYPES + EXTENDED_TYPES)
+    if type_token not in all_types:
+        raise TypeError(f'{type_token!r} is not a supported type')
+
+    rule_dict = {'type': type_token}
+    transforms = []
+    seen_validator = False
+    min_val = None
+    max_val = None
+
+    for token in tokens[1:]:
+        key, _, value = token.partition(':')
+        key = key.strip()
+        value = value or None
+
+        # --- transforms must precede validators ---
+        if key in _TRANSFORM_MAP:
+            if seen_validator:
+                raise ValueError(
+                    f'Transform {key!r} must come before validators in rule: {rule!r}'
+                )
+            transforms.append(_TRANSFORM_MAP[key])
+            continue
+
+        seen_validator = True
+
+        if key == 'strict':
+            rule_dict['strict'] = True
+
+        elif key == 'nullable':
+            rule_dict['nullable'] = True
+
+        elif key == 'unique':
+            rule_dict['unique'] = True
+
+        elif key == 'min':
+            if value is None:
+                raise ValueError(f'min requires a value in rule: {rule!r}')
+            min_val = value
+
+        elif key == 'max':
+            if value is None:
+                raise ValueError(f'max requires a value in rule: {rule!r}')
+            max_val = value
+
+        elif key == 'between':
+            if min_val is not None or max_val is not None:
+                raise ValueError(
+                    f'Cannot combine "between" with "min" or "max" in rule: {rule!r}'
+                )
+            parts = value.split(',', 1) if value else []
+            if len(parts) != 2:
+                raise ValueError(
+                    f'"between" requires two comma-separated values in rule: {rule!r}'
+                )
+            rule_dict['range'] = (
+                _coerce_range_val(parts[0].strip()),
+                _coerce_range_val(parts[1].strip()),
+            )
+
+        elif key == 'in':
+            if value is None:
+                raise ValueError(f'"in" requires a value in rule: {rule!r}')
+            rule_dict['options'] = tuple(v.strip() for v in value.split(','))
+
+        elif key == 'not_in':
+            if value is None:
+                raise ValueError(f'"not_in" requires a value in rule: {rule!r}')
+            rule_dict['excludes'] = tuple(v.strip() for v in value.split(','))
+
+        elif key == 'starts_with':
+            if value is None:
+                raise ValueError(f'"starts_with" requires a value in rule: {rule!r}')
+            rule_dict['startswith'] = value
+
+        elif key == 'ends_with':
+            if value is None:
+                raise ValueError(f'"ends_with" requires a value in rule: {rule!r}')
+            rule_dict['endswith'] = value
+
+        elif key == 'contains':
+            if value is None:
+                raise ValueError(f'"contains" requires a value in rule: {rule!r}')
+            rule_dict['contains'] = value
+
+        elif key == 'format':
+            if value is None:
+                raise ValueError(f'"format" requires a value in rule: {rule!r}')
+            rule_dict['format'] = value
+
+        elif key == 're':
+            # value is everything after the first colon — colons in pattern are safe
+            if value is None:
+                raise ValueError(f'"re" requires a pattern in rule: {rule!r}')
+            rule_dict['expression'] = value
+
+        elif key == 'msg':
+            rule_dict['message'] = value or ''
+
+        else:
+            raise ValueError(f'Unknown modifier {key!r} in rule: {rule!r}')
+
+    # --- resolve min/max into range ---
+    if min_val is not None or max_val is not None:
+        if 'range' in rule_dict:
+            raise ValueError(
+                f'Cannot combine "between" with "min" or "max" in rule: {rule!r}'
+            )
+        rule_dict['range'] = (
+            _coerce_range_val(min_val) if min_val is not None else 'any',
+            _coerce_range_val(max_val) if max_val is not None else 'any',
+        )
+
+    # --- attach transforms ---
+    if transforms:
+        rule_dict['transform'] = (
+            transforms[0] if len(transforms) == 1 else _chain_transforms(transforms)
+        )
+
+    return rule_dict
+
+
 def expand_rule(rule):
     expanded_rules = []
 
@@ -250,6 +455,9 @@ def expand_rule(rule):
         raise ValueError(f'Invalid rule {rule}')
 
     def expand_rule_string(rule):
+        if '|' in rule:
+            return _expand_pipe_rule(rule)
+
         rule_dict = {}
         _type = rule.split(':')[0].strip() if ':' in rule else rule
 
