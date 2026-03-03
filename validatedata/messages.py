@@ -1,4 +1,4 @@
-error_messages = {
+error_messages: dict[str, str] = {
     'type_invalid': 'Expected value of type %s, found %s',
     'field_type_invalid': 'Expected value of type %s for field %s, found %s',
     'length_invalid': 'value is not of required length',

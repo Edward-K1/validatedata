@@ -444,18 +444,6 @@ class TestPipeEndToEnd(BaseTest):
         result = validate_data(['hello'], ['str:5'])
         self.assertTrue(result.ok)
 
-    def test_dict_rule_with_pipe_values_not_supported(self):
-        """Pipe strings as values inside a {'keys': {...}} dict are not expanded —
-        dict rule values must be dicts. Use a list of pipe strings for that pattern."""
-        with self.assertRaises((ValueError, TypeError)):
-            validate_data(
-                data={'username': 'alice', 'age': 25},
-                rule={'keys': {
-                    'username': 'str|min:3|max:32',
-                    'age': 'int|min:18',
-                }}
-            )
-
     def test_strict_mode_rejects_coercion(self):
         result = validate_data(['42'], ['int|strict'])
         self.assertFalse(result.ok)
@@ -467,3 +455,71 @@ class TestPipeEndToEnd(BaseTest):
     def test_unique_list_invalid(self):
         result = validate_data([[1, 2, 2]], ['list|unique'])
         self.assertFalse(result.ok)
+
+
+class TestKeysShorthandExpansion(unittest.TestCase):
+
+    def test_shorthand_in_keys_does_not_raise(self):
+        """Passing shorthand strings inside {'keys': {...}} should not raise ValueError."""
+        try:
+            result = validate_data(
+                data={'username': 'alice', 'email': 'alice@example.com', 'age': 25},
+                rule={'keys': {
+                    'username': 'str|min:3|max:32',
+                    'email': 'email',
+                    'age': 'int|min:18',
+                }},
+            )
+        except ValueError as e:
+            self.fail(
+                f"validate_data raised ValueError with shorthand inside 'keys': {e}"
+            )
+
+    def test_shorthand_in_keys_valid_data_passes(self):
+        """Valid data against shorthand keys rules should return ok=True."""
+        result = validate_data(
+            data={'username': 'alice', 'email': 'alice@example.com', 'age': 25},
+            rule={'keys': {
+                'username': 'str|min:3|max:32',
+                'email': 'email',
+                'age': 'int|min:18',
+            }},
+        )
+        self.assertTrue(result.ok)
+
+    def test_shorthand_in_keys_invalid_data_fails(self):
+        """Invalid data against shorthand keys rules should return ok=False."""
+        result = validate_data(
+            data={'username': 'al', 'email': 'not-an-email', 'age': 15},
+            rule={'keys': {
+                'username': 'str|min:3|max:32',
+                'email': 'email',
+                'age': 'int|min:18',
+            }},
+        )
+        self.assertFalse(result.ok)
+
+    def test_shorthand_in_keys_matches_flat_list_behaviour(self):
+        """Keys-dict shorthand and flat-list shorthand should produce the same result."""
+        data_valid = ['alice', 'alice@example.com', 25]
+        data_dict = {'username': 'alice', 'email': 'alice@example.com', 'age': 25}
+
+        flat_result = validate_data(
+            data=data_valid,
+            rule=[
+                'str|min:3|max:32',
+                'email',
+                'int|min:18',
+            ],
+        )
+
+        keys_result = validate_data(
+            data=data_dict,
+            rule={'keys': {
+                'username': 'str|min:3|max:32',
+                'email': 'email',
+                'age': 'int|min:18',
+            }},
+        )
+
+        self.assertEqual(flat_result.ok, keys_result.ok)

@@ -1,8 +1,29 @@
+from __future__ import annotations
+
 from collections import OrderedDict
 from functools import wraps
 from inspect import getfullargspec, iscoroutinefunction
+from typing import Any
 
-from .validator import Validator, _has_nested_rules
+from .validator import Validator, ValidationError, _has_nested_rules
+
+
+class ValidationResult:
+    """Return type of :func:`validate_data`.
+
+    Attributes:
+        ok: ``True`` if validation passed, ``False`` otherwise.
+        errors: A list of error messages. When ``group_errors=True`` (the
+            default), each entry is itself a list of strings — one sub-list
+            per field. When ``group_errors=False`` errors is a flat list of
+            strings.
+        data: The transformed values in their original order. Only present
+            when ``mutate=True`` was passed to :func:`validate_data`.
+    """
+
+    ok: bool
+    errors: list[Any]
+    data: list[Any]
 
 BASIC_TYPES = (
     'bool',
@@ -37,7 +58,13 @@ class EmptyObject:
 EMPTY = EmptyObject()
 
 
-def _build_func_data(func, obj, args, kwargs, is_class=False):
+def _build_func_data(
+    func: Any,
+    obj: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    is_class: bool = False,
+) -> tuple[OrderedDict[str, Any], OrderedDict[str, Any], bool]:
     """Extract and align positional/keyword arguments into an OrderedDict for validation."""
     func_data = OrderedDict()
     func_defaults = OrderedDict()
@@ -74,7 +101,13 @@ def _build_func_data(func, obj, args, kwargs, is_class=False):
     return func_data, func_defaults, obj_is_cls
 
 
-def validate(rule, raise_exceptions=False, is_class=False, mutate=False, **kwds):
+def validate(
+    rule: str | dict[str, Any] | list[str | dict[str, Any]],
+    raise_exceptions: bool = False,
+    is_class: bool = False,
+    mutate: bool = False,
+    **kwds: Any,
+) -> Any:
     def decorator(func):
         if iscoroutinefunction(func):
             @wraps(func)
@@ -129,8 +162,12 @@ def validate(rule, raise_exceptions=False, is_class=False, mutate=False, **kwds)
 
 
 def validate_types(
-    func=None, raise_exceptions=True, is_class=False, mutate=False, **kwds
-):
+    func: Any = None,
+    raise_exceptions: bool = True,
+    is_class: bool = False,
+    mutate: bool = False,
+    **kwds: Any,
+) -> Any:
     """
     Decorator that validates function arguments against their type annotations.
 
@@ -209,8 +246,13 @@ def validate_types(
 
 
 def validate_data(
-    data, rule, raise_exceptions=False, defaults={}, mutate=False, **kwds
-):
+    data: str | list[Any] | tuple[Any, ...] | dict[str, Any],
+    rule: str | dict[str, Any] | list[str | dict[str, Any]],
+    raise_exceptions: bool = False,
+    defaults: dict[str, Any] = {},
+    mutate: bool = False,
+    **kwds: Any,
+) -> ValidationResult:
     expanded_rule = expand_rule(rule)
     is_nested = _has_nested_rules(
         expanded_rule if isinstance(expanded_rule, list) else rule
@@ -229,7 +271,8 @@ def validate_data(
         dict_rules = []
         ordered_data = OrderedDict()
         for key in expanded_rule['keys']:
-            dict_rules.append(expanded_rule['keys'][key])
+            rule = expanded_rule['keys'][key]
+            dict_rules.append(expand_rule(rule)[0] if isinstance(rule, str) else rule)
             ordered_data[key] = data.get(key, EMPTY)
 
         expanded_rule = dict_rules
@@ -299,7 +342,7 @@ def _pipe_tokenize(s):
     return tokens
 
 
-def _coerce_range_val(v):
+def _coerce_range_val(v: str) -> int | float | str:
     """Convert a range bound string to int, float, or leave as-is (dates, 'any')."""
     if v == 'any':
         return 'any'
@@ -309,7 +352,7 @@ def _coerce_range_val(v):
         return v
 
 
-def _chain_transforms(fns):
+def _chain_transforms(fns: list[Any]) -> Any:
     def apply(v):
         for fn in fns:
             v = fn(v)
@@ -317,7 +360,7 @@ def _chain_transforms(fns):
     return apply
 
 
-def _expand_pipe_rule(rule):
+def _expand_pipe_rule(rule: str) -> dict[str, Any]:
     """Parse a pipe-syntax shorthand rule string into an expanded rule dict."""
     tokens = _pipe_tokenize(rule)
 
@@ -445,7 +488,7 @@ def _expand_pipe_rule(rule):
     return rule_dict
 
 
-def expand_rule(rule):
+def expand_rule(rule: str | dict[str, Any] | list[str | dict[str, Any]]) -> list[dict[str, Any]] | dict[str, Any]:
     expanded_rules = []
 
     if not isinstance(rule, (str, tuple, list, dict)):

@@ -880,6 +880,27 @@ if not result.ok:
 
 ---
 
+## Contributing
+
+Contributions are welcome!
+
+**Before starting work on a new feature or non-trivial change, please open an issue first.**
+This helps avoid duplicate effort and lets us align on scope and approach before any code is written.
+
+### Getting Started
+
+1. Open an issue describing what you'd like to add or change
+2. Fork the repository and create a branch off `main`
+```
+   git checkout -b feature/your-feature-name
+```
+3. Make your changes and add tests where appropriate
+4. Open a pull request referencing the issue
+
+For bug fixes and small improvements, feel free to skip the issue and go straight to a PR.
+
+---
+
 ## License
 
 MIT
