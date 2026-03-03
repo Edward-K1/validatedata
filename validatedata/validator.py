@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import ipaddress
 import logging
 import re
@@ -9,6 +11,7 @@ from datetime import datetime
 from dateutil.parser import parse as parse_date
 from types import SimpleNamespace
 from enum import Enum
+from typing import Any
 
 from .messages import error_messages as errm
 
@@ -311,14 +314,14 @@ def _has_nested_rules(rules):
 class Validator:
     def __init__(
         self,
-        native_types,
-        basic_types,
-        extended_types,
-        raise_exceptions,
-        mutate=False,
-        nested=False,
-        **kwds,
-    ):
+        native_types: tuple[type, ...],
+        basic_types: tuple[str, ...],
+        extended_types: tuple[str, ...],
+        raise_exceptions: bool,
+        mutate: bool = False,
+        nested: bool = False,
+        **kwds: Any,
+    ) -> None:
         self.errors = []
         self.error_keys = []
         self.log_errors = False
@@ -347,7 +350,7 @@ class Validator:
         self.is_known_exception = False
         self.error_key = ErrorKeys.INVALID_TYPE
 
-    def _build_path(self, parent_path, key, index=None):
+    def _build_path(self, parent_path: str, key: Any, index: int | None = None) -> str:
         if index is not None:
             segment = f'[{index}]'
             return f'{parent_path}{segment}' if parent_path else segment
@@ -355,11 +358,11 @@ class Validator:
             return str(key) if key else ''
         return f'{parent_path}.{key}' if key else parent_path
 
-    def _append_nested_error(self, path, message):
+    def _append_nested_error(self, path: str, message: str) -> None:
         prefix = f'{path}: ' if path else ''
         self.errors.append(f'{prefix}{message}')
 
-    def _store_error(self, path, message):
+    def _store_error(self, path: str, message: str) -> None:
         """Route error to the right format based on nested mode."""
         if self.nested:
             self._append_nested_error(path, message)
@@ -570,7 +573,7 @@ class Validator:
 
         return SimpleNamespace(**result)
 
-    def _check_depends_on(self, rules, key, value, full_data):
+    def _check_depends_on(self, rules: dict[str, Any], key: str, value: Any, full_data: dict[str, Any]) -> bool:
         depends_on = rules.get('depends_on')
         if depends_on is None:
             return True
@@ -586,11 +589,11 @@ class Validator:
             return sibling_value == expected_value
         return True
 
-    def raise_known_exception(self, message, ex_type=ValidationError):
+    def raise_known_exception(self, message: str, ex_type: type[Exception] = ValidationError) -> None:
         self.is_known_exception = True
         raise ex_type(message)
 
-    def set_validation_data(self, **kwargs):
+    def set_validation_data(self, **kwargs: Any) -> None:
         self.data_key = kwargs['data_key']
         self.data_value = kwargs['data_value']
         self.rule_key = kwargs['rule_key']
@@ -598,7 +601,7 @@ class Validator:
         self.current_rules = kwargs['all_rules']
         self._type = kwargs['all_rules']['type']
 
-    def _get_error_message(self, error_key, rules, field='', rule_key=''):
+    def _get_error_message(self, error_key: ErrorKeys | str, rules: dict[str, Any], field: str = '', rule_key: str = '') -> str:
         key_val = error_key.value if hasattr(error_key, 'value') else error_key
         raw_error = errm.get(f'field_{key_val}', '') if field else ''
         raw_error = raw_error or errm.get(key_val, '') or errm['no_error_message']
@@ -607,7 +610,7 @@ class Validator:
         )
         return custom_message or raw_error
 
-    def append_error(self, path='', **kwargs):
+    def append_error(self, path: str = '', **kwargs: Any) -> None:
         key = self.data_key
         rules = self.current_rules
         rule_key = self.rule_key
@@ -615,7 +618,7 @@ class Validator:
         message = self._get_error_message(error_key, rules, key, rule_key)
         self._store_error(path or key, message)
 
-    def validate_length(self, path='', **kwargs):
+    def validate_length(self, path: str = '', **kwargs: Any) -> None:
         self.set_validation_data(**kwargs)
         self.error_key = ErrorKeys.INVALID_LENGTH
         if not isinstance(kwargs['rule_value'], int):
@@ -631,7 +634,7 @@ class Validator:
             else:
                 self.append_error(path=path)
 
-    def validate_contains(self, path='', **kwargs):
+    def validate_contains(self, path: str = '', **kwargs: Any) -> None:
         self.set_validation_data(**kwargs)
         self.error_key = ErrorKeys.MISSING_REQUIRED_DATA
         if isinstance(self.rule_value, str):
@@ -662,7 +665,7 @@ class Validator:
                     if not all(val in set(self.data_value) for val in self.rule_value):
                         self.append_error(path=path)
 
-    def validate_excludes(self, path='', **kwargs):
+    def validate_excludes(self, path: str = '', **kwargs: Any) -> None:
         self.set_validation_data(**kwargs)
         self.error_key = ErrorKeys.NOT_EXCLUDED
         if self._type in self.basic_types_plus_regex:
@@ -672,7 +675,7 @@ class Validator:
             if any(val in set(self.data_value) for val in self.rule_value):
                 self.append_error(path=path)
 
-    def validate_options(self, path='', **kwargs):
+    def validate_options(self, path: str = '', **kwargs: Any) -> None:
         self.set_validation_data(**kwargs)
         self.error_key = ErrorKeys.NOT_IN_OPTIONS
         if self._type in self.basic_types_plus_regex:
@@ -682,7 +685,7 @@ class Validator:
             if not all(val in set(self.rule_value) for val in self.data_value):
                 self.append_error(path=path)
 
-    def validate_expression(self, path='', **kwargs):
+    def validate_expression(self, path: str = '', **kwargs: Any) -> None:
         self.set_validation_data(**kwargs)
         self.error_key = ErrorKeys.DOES_NOT_MATCH_REGEX
         try:
@@ -692,7 +695,7 @@ class Validator:
         if regex.match(self.data_value) is None:
             self.append_error(path=path)
 
-    def validate_range(self, path='', **kwargs):
+    def validate_range(self, path: str = '', **kwargs: Any) -> None:
         self.set_validation_data(**kwargs)
         self.error_key = ErrorKeys.NOT_IN_RANGE
         if not isinstance(self.rule_value, (list, tuple)):
@@ -745,9 +748,11 @@ class Validator:
 
         elif self._type in ('list', 'tuple'):
             self.error_key = ErrorKeys.LIST_OR_TUPLE_NOT_IN_RANGE
+            min_len = 0 if self.rule_value[0] == 'any' else self.rule_value[0]
+            max_len = float('inf') if self.rule_value[1] == 'any' else self.rule_value[1]
             if not (
-                len(self.data_value) >= self.rule_value[0]
-                and len(self.data_value) <= self.rule_value[1]
+                len(self.data_value) >= min_len
+                and len(self.data_value) <= max_len
             ):
                 self.append_error(path=path)
 
@@ -763,7 +768,7 @@ class Validator:
             if not (cast_value >= float(min_value) and cast_value <= float(max_value)):
                 self.append_error(path=path)
 
-    def validate_startswith(self, path='', **kwargs):
+    def validate_startswith(self, path: str = '', **kwargs: Any) -> None:
         self.set_validation_data(**kwargs)
         self.error_key = ErrorKeys.DOES_NOT_STARTWITH
         if self._type in self.basic_types_plus_regex:
@@ -774,7 +779,7 @@ class Validator:
                 if not self.data_value or self.data_value[0] != self.rule_value:
                     self.append_error(path=path)
 
-    def validate_endswith(self, path='', **kwargs):
+    def validate_endswith(self, path: str = '', **kwargs: Any) -> None:
         self.set_validation_data(**kwargs)
         self.error_key = ErrorKeys.DOES_NOT_ENDWITH
         if self._type in self.basic_types_plus_regex:
@@ -785,17 +790,17 @@ class Validator:
                 if not self.data_value or self.data_value[-1] != self.rule_value:
                     self.append_error(path=path)
 
-    def validate_unique(self, path='', **kwargs):
+    def validate_unique(self, path: str = '', **kwargs: Any) -> None:
         self.set_validation_data(**kwargs)
         self.error_key = ErrorKeys.NOT_UNIQUE
         if self._type in ('list', 'tuple', 'set'):
             if len(self.data_value) != len(set(self.data_value)):
                 self.append_error(path=path)
 
-    def validate_unknown(self, path='', **kwargs):
+    def validate_unknown(self, path: str = '', **kwargs: Any) -> None:
         pass
 
-    def validate_rule(self, key, value, rules, path=''):
+    def validate_rule(self, key: str, value: Any, rules: dict[str, Any], path: str = '') -> None:
         rule_map = {
             'range': self.validate_range,
             'length': self.validate_length,
@@ -867,6 +872,7 @@ class Validator:
         status = False
 
         def append_type_error(error_key=ErrorKeys.INVALID_TYPE):
+            nonlocal status
             true_type = data_type
             if true_type == 'annotation':
                 true_type = rules['object'].__qualname__
@@ -883,6 +889,7 @@ class Validator:
             else:
                 formatted = custom_message or raw_error
 
+            status = False
             if append_errors:
                 self._store_error(path or field_name, formatted)
 

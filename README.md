@@ -25,13 +25,17 @@ pip install phonenumbers
 ```python
 from validatedata import validate_data
 
+# with shorthand
+rule={'keys': {
+    'username': 'str|min:3|max:32',
+    'email': 'email',
+    'age': 'int|min:18',
+}}
+
+
 result = validate_data(
     data={'username': 'alice', 'email': 'alice@example.com', 'age': 25},
-    rule={'keys': {
-        'username': {'type': 'str', 'range': (3, 32)},
-        'email': {'type': 'email'},
-        'age': {'type': 'int', 'range': (18, 'any')}
-    }}
+    rule=rule
 )
 
 if result.ok:
@@ -39,6 +43,18 @@ if result.ok:
 else:
     print(result.errors)
 ```
+
+> **Python 3.7+:** For simple cases you can omit the `keys` wrapper and pass a bare field map directly:
+>
+> ```python
+> rule = {
+>     'username': 'str|min:3|max:32',
+>     'email': 'email',
+>     'age': 'int|min:18',
+> }
+> ```
+>
+> The `keys` form is recommended when you need to pair field rules with top-level options (such as `strict_keys` in a future release).
 
 ---
 
@@ -95,6 +111,19 @@ user = User()
 user.signup('alice_99', 'alice@example.com', 'Secure@123')  # works
 user.signup('alice_99', 'not-an-email', 'weak')              # raises ValidationError
 ```
+
+Async functions are supported. The decorator behaves identically:
+```python
+from validatedata import validate
+
+@validate(signup_rules, raise_exceptions=True)
+async def signup(self, username, email, password):
+    await db.save(username, email, password)
+    return 'Account Created'
+```
+
+`validate_types` works the same way with async functions.
+
 
 Class methods:
 
@@ -254,26 +283,228 @@ rules = [{
 
 ## Shorthand Rule Strings
 
-For common cases rules can be expressed as compact strings:
+Rules can be expressed as compact strings instead of dicts. There are two syntaxes: the original **colon syntax** for simple cases, and the newer **pipe syntax** for anything more expressive. Both work side by side in the same rule list.
+
+---
+
+### Colon syntax (original)
 
 ```python
-'str'               # string
-'str:20'            # string of exactly 20 characters
-'int:10'            # int of length 10
-'email'             # email address
-'email:msg:invalid email address'   # email with custom message
-'int:1:to:100'      # int in range 1 to 100
-'regex:[A-Z]{3}'    # must match regex
+'str'                                    # string
+'str:20'                                 # string of exactly 20 characters
+'int:10'                                 # int of exactly 10 digits
+'email'                                  # email address
+'email:msg:invalid email address'        # with custom error message
+'int:1:to:100'                           # int in range 1 to 100
+'regex:[A-Z]{3}'                         # must match regex
 ```
 
-Mixed shorthand and dict rules in the same list:
+---
+
+### Pipe syntax
+
+The pipe syntax uses `|` to chain modifiers onto a type. It supports the full set of validation rules, optional transforms, and custom messages — all in one readable string.
+
+**General shape:**
+
+```
+type [| transform ...] [| modifier ...] [| msg:message]
+```
+
+Transforms must come before validators. `msg:` must always be last.
+
+#### Type
+
+Any supported type name is valid as the first token:
+
+```python
+'str|...'
+'int|...'
+'email|...'
+'url|...'
+'uuid|...'
+# ...any type from the Types section
+```
+
+#### Flags
+
+```python
+'int|strict'                             # no type coercion — value must already be the right type
+'email|nullable'                         # None is accepted as a valid value
+'int|strict|nullable'                    # both
+```
+
+#### Range
+
+```python
+'int|min:18'                             # >= 18, no upper limit
+'int|max:100'                            # no lower limit, <= 100
+'int|min:0|max:100'                      # between 0 and 100 inclusive
+'int|between:0,100'                      # shorthand for the above
+'str|min:3|max:32'                       # string length between 3 and 32
+'float|min:0.5|max:9.9'                  # float range
+'list|min:1|max:10'                      # list must have between 1 and 10 items
+```
+
+`min` and `max` can be used independently for open bounds. `between` is a convenience alias for `min` + `max` together — they cannot be combined.
+
+> **Note:** `validatedata` does not impose a maximum size on lists or tuples. If you are validating untrusted input in a web API or other public-facing context, always set an explicit upper bound to prevent memory exhaustion from unexpectedly large payloads.
+
+#### Enums and exclusions
+
+```python
+'str|in:admin,user,guest'                # value must be one of these
+'str|not_in:root,superuser'              # value must not be any of these
+```
+
+#### String constraints
+
+```python
+'str|starts_with:https'                  # must start with this prefix
+'str|ends_with:.pdf'                     # must end with this suffix
+'str|contains:@'                         # must contain this substring
+'list|unique'                            # no duplicate values
+```
+
+Values can safely contain `|` — the parser only splits on `|` when followed by a recognised keyword:
+
+```python
+'str|starts_with:image/png|min:3'        # 'image/png' is treated as one value
+```
+
+#### Format
+
+For types that support format variants:
+
+```python
+'color|format:hex'                       # #fff or #ffffff
+'color|format:rgb'                       # rgb(255, 0, 0)
+'color|format:hsl'                       # hsl(0, 100%, 50%)
+'color|format:named'                     # red, cornflowerblue, etc.
+'phone|format:national'                  # (415) 555-2671  — requires: pip install phonenumbers
+'phone|format:e164'                      # +14155552671  — built-in
+```
+
+#### Transforms
+
+Named transforms are applied to the value **before** validation runs. They are the only modifiers that must come before validators.
+
+```python
+'str|strip|min:3|max:32'                 # strip whitespace, then check length
+'str|lower|in:admin,user,guest'          # lowercase, then check options
+'str|strip|lower|min:3|max:32'           # chain as many as needed
+```
+
+Available named transforms: `strip`, `lstrip`, `rstrip`, `lower`, `upper`, `title`.
+
+To get the transformed value back, pass `mutate=True` to `validate_data` or `@validate`:
+
+```python
+result = validate_data(['  Alice  '], ['str|strip|lower'], mutate=True)
+result.data  # ['alice']
+```
+
+#### Regex
+
+```python
+'str|re:[A-Z]{3}'                        # must match pattern
+'str|min:8|re:(?=.*[A-Z])(?=.*\d).+'    # combined with other modifiers
+```
+
+The pattern is everything after `re:` up to the next recognised modifier or end of string. Patterns can safely contain `:` and `|`:
+
+```python
+'str|re:https?://\S+'                    # colons in pattern are safe
+'str|re:(?=.*[A-Z]|.*\d).+'             # pipes in pattern are safe
+```
+
+#### Custom error message
+
+`msg:` must be the last modifier. The message text can contain any characters including `|`:
+
+```python
+'str|min:3|max:32|msg:must be 3 to 32 characters'
+'int|min:18|msg:you must be 18 or older'
+'str|re:[A-Z]+|msg:uppercase letters only'
+'int|min:0|msg:must be positive | or zero'   # | inside message is fine
+```
+
+---
+
+### Mixing syntaxes
+
+Colon shorthand, pipe shorthand, and dict rules can all coexist in the same rule list:
 
 ```python
 rules = [
-    {'type': 'str', 'expression': r'^[^\d\W_]+[\w\d_-]{2,31}$', 'expression-message': 'invalid username'},
-    'email:msg:invalid email',
-    {'type': 'str', 'length': 8, 'message': 'password must be 8 characters'}
+    {'type': 'str', 'expression': r'^[\w-]{3,32}$', 'expression-message': 'invalid username'},
+    'email|nullable|msg:invalid email',
+    'str|min:8|re:(?=.*[A-Z])(?=.*\d).+|msg:password too weak',
 ]
+```
+
+---
+
+### Reference table
+
+| Modifier | Example | Description |
+|---|---|---|
+| `strict` | `int\|strict` | No type coercion |
+| `nullable` | `email\|nullable` | Allow `None` |
+| `unique` | `list\|unique` | No duplicate values |
+| `min:N` | `int\|min:18` | Minimum value or length |
+| `max:N` | `int\|max:100` | Maximum value or length |
+| `between:N,M` | `int\|between:0,100` | Range shorthand |
+| `in:a,b,c` | `str\|in:admin,user` | Allowed values |
+| `not_in:a,b` | `str\|not_in:root` | Excluded values |
+| `starts_with:x` | `str\|starts_with:https` | Required prefix |
+| `ends_with:x` | `str\|ends_with:.pdf` | Required suffix |
+| `contains:x` | `str\|contains:@` | Required substring |
+| `format:x` | `color\|format:hex` | Format variant |
+| `strip` | `str\|strip\|min:3` | Remove surrounding whitespace |
+| `lstrip` | `str\|lstrip\|min:3` | Remove leading whitespace |
+| `rstrip` | `str\|rstrip\|min:3` | Remove trailing whitespace |
+| `lower` | `str\|lower\|in:yes,no` | Lowercase before validating |
+| `upper` | `str\|upper\|starts_with:ADM` | Uppercase before validating |
+| `title` | `str\|title\|min:3` | Title case before validating |
+| `re:pattern` | `str\|re:[A-Z]{3}` | Regex pattern |
+| `msg:text` | `str\|min:3\|msg:too short` | Custom error message — must be last |
+
+---
+
+### Real-world examples
+
+```python
+# user signup fields
+rules = [
+    'str|strip|min:3|max:32|msg:username must be 3 to 32 characters',
+    'email|nullable|msg:invalid email address',
+    'str|min:8|re:(?=.*[A-Z])(?=.*\d).+|msg:password must contain uppercase and a number',
+]
+
+# role with enum
+'str|in:admin,editor,viewer|msg:invalid role'
+
+# optional hex colour
+'color|format:hex|nullable'
+
+# URL that must use HTTPS
+'url|starts_with:https|msg:must be a secure URL'
+
+# slugified identifier
+'slug|min:3|max:64|msg:invalid slug'
+
+# age gate
+'int|strict|min:18|max:120|msg:invalid age'
+
+# phone — any format, optional
+'phone|nullable'
+
+# deduplicated tag list
+'list|unique|min:1|max:10'
+
+# transform then validate
+'str|strip|lower|in:yes,no,maybe|msg:invalid response'
 ```
 
 ---
@@ -281,6 +512,8 @@ rules = [
 ## Range Rule
 
 The `'any'` keyword is used as an open bound:
+
+> **Note:** `validatedata` does not impose a maximum size on lists or tuples. If you are validating untrusted input in a web API or other public-facing context, always set an explicit upper bound to prevent memory exhaustion from unexpectedly large payloads.
 
 ```python
 {'type': 'int', 'range': (1, 'any')}               # >= 1, no upper limit
@@ -666,6 +899,28 @@ if not result.ok:
 - Nested data (`fields`, `items`) automatically switches error format to path-prefixed strings
 - The current version does not support `depends_on` across nested levels
 - `transform` runs before type checking, so the transformed value is what gets validated
+
+---
+
+## Contributing
+
+Contributions are welcome!
+
+**Before starting work on a new feature or non-trivial change, please open an issue first.**
+This helps avoid duplicate effort and lets us align on scope and approach before any code is written.
+
+### Getting Started
+
+1. Open an issue describing what you'd like to add or change
+2. You'll be informed if there's someone working on it and given the green light if it's the right call
+2. Fork the repository and create a branch off `main`
+```
+   git checkout -b feature/your-feature-name
+```
+3. Make your changes and add tests where appropriate
+4. Open a pull request referencing the issue
+
+For bug fixes and small improvements, feel free to skip the issue and go straight to a PR.
 
 ---
 

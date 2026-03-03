@@ -1,8 +1,29 @@
+from __future__ import annotations
+
 from collections import OrderedDict
 from functools import wraps
-from inspect import getfullargspec
+from inspect import getfullargspec, iscoroutinefunction
+from typing import Any
 
-from .validator import Validator, _has_nested_rules
+from .validator import Validator, ValidationError, _has_nested_rules
+
+
+class ValidationResult:
+    """Return type of :func:`validate_data`.
+
+    Attributes:
+        ok: ``True`` if validation passed, ``False`` otherwise.
+        errors: A list of error messages. When ``group_errors=True`` (the
+            default), each entry is itself a list of strings — one sub-list
+            per field. When ``group_errors=False`` errors is a flat list of
+            strings.
+        data: The transformed values in their original order. Only present
+            when ``mutate=True`` was passed to :func:`validate_data`.
+    """
+
+    ok: bool
+    errors: list[Any]
+    data: list[Any]
 
 BASIC_TYPES = (
     'bool',
@@ -37,65 +58,103 @@ class EmptyObject:
 EMPTY = EmptyObject()
 
 
-def validate(rule, raise_exceptions=False, is_class=False, mutate=False, **kwds):
+def _build_func_data(
+    func: Any,
+    obj: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    is_class: bool = False,
+) -> tuple[OrderedDict[str, Any], OrderedDict[str, Any], bool]:
+    """Extract and align positional/keyword arguments into an OrderedDict for validation."""
+    func_data = OrderedDict()
+    func_defaults = OrderedDict()
+    func_defn = getfullargspec(func)
+    obj_is_cls = True if (is_class or (func_defn.args and func_defn.args[0] == 'self')) else False
+    clean_params = func_defn.args[1:] if obj_is_cls else func_defn.args
+
+    func_data.update(zip(clean_params, [EMPTY] * len(clean_params)))
+
+    if func_defn.defaults:
+        defaults_dict = OrderedDict(
+            zip(clean_params[-len(func_defn.defaults):], func_defn.defaults)
+        )
+        func_data.update(defaults_dict)
+        func_defaults.update(defaults_dict)
+
+    if not obj_is_cls:
+        func_data[clean_params[0]] = obj
+
+    if args:
+        if obj_is_cls:
+            func_data.update(zip(clean_params, args))
+        else:
+            func_data.update(zip(clean_params[1:], args))
+
+    if kwargs:
+        func_data.update(
+            zip(
+                [k for k in kwargs.keys() if k in set(func_data.keys())],
+                kwargs.values(),
+            )
+        )
+
+    return func_data, func_defaults, obj_is_cls
+
+
+def validate(
+    rule: str | dict[str, Any] | list[str | dict[str, Any]],
+    raise_exceptions: bool = False,
+    is_class: bool = False,
+    mutate: bool = False,
+    **kwds: Any,
+) -> Any:
     def decorator(func):
-        @wraps(func)
-        def wrapper(obj=EMPTY, *args, **kwargs):
-            func_data = OrderedDict()
-            func_defaults = OrderedDict()
-            func_defn = getfullargspec(func)
-            obj_is_cls = (
-                True if (is_class == True or func_defn.args[0] == 'self') else False
-            )
-            clean_params = func_defn.args[1:] if obj_is_cls else func_defn.args
-
-            func_data.update(
-                zip(clean_params, [EMPTY for x in range(len(clean_params))])
-            )
-
-            if func_defn.defaults:
-                defaults_dict = OrderedDict(
-                    zip(clean_params[-len(func_defn.defaults) :], func_defn.defaults)
+        if iscoroutinefunction(func):
+            @wraps(func)
+            async def wrapper(obj=EMPTY, *args, **kwargs):
+                func_data, func_defaults, obj_is_cls = _build_func_data(
+                    func, obj, args, kwargs, is_class
                 )
-                func_data.update(defaults_dict)
-                func_defaults.update(defaults_dict)
-
-            if not obj_is_cls:
-                func_data[clean_params[0]] = obj
-
-            if args:
-                if obj_is_cls:
-                    func_data.update(zip(clean_params, args))
-                else:
-                    func_data.update(zip(clean_params[1:], args))
-
-            if kwargs:
-                func_data.update(
-                    zip(
-                        [k for k in kwargs.keys() if k in set(func_data.keys())],
-                        kwargs.values(),
-                    )
+                result = validate_data(
+                    func_data, rule, raise_exceptions, func_defaults, mutate=mutate, **kwds
                 )
-
-            result = validate_data(
-                func_data, rule, raise_exceptions, func_defaults, mutate=mutate, **kwds
-            )
-
-            if result.ok:
-                if mutate and hasattr(result, 'data') and result.data:
-                    # pass transformed values to the function
-                    transformed = result.data
-                    if obj_is_cls:
-                        return func(obj, *transformed, **kwargs)
+                if result.ok:
+                    if mutate and hasattr(result, 'data') and result.data:
+                        transformed = result.data
+                        if obj_is_cls:
+                            return await func(obj, *transformed, **kwargs)
+                        else:
+                            return await func(*transformed, **kwargs)
                     else:
-                        return func(*transformed, **kwargs)
+                        if isinstance(obj, EmptyObject):
+                            return await func(*args, **kwargs)
+                        else:
+                            return await func(obj, *args, **kwargs)
                 else:
-                    if isinstance(obj, EmptyObject):
-                        return func(*args, **kwargs)
+                    return {'errors': result.errors}
+        else:
+            @wraps(func)
+            def wrapper(obj=EMPTY, *args, **kwargs):
+                func_data, func_defaults, obj_is_cls = _build_func_data(
+                    func, obj, args, kwargs, is_class
+                )
+                result = validate_data(
+                    func_data, rule, raise_exceptions, func_defaults, mutate=mutate, **kwds
+                )
+                if result.ok:
+                    if mutate and hasattr(result, 'data') and result.data:
+                        transformed = result.data
+                        if obj_is_cls:
+                            return func(obj, *transformed, **kwargs)
+                        else:
+                            return func(*transformed, **kwargs)
                     else:
-                        return func(obj, *args, **kwargs)
-            else:
-                return {'errors': result.errors}
+                        if isinstance(obj, EmptyObject):
+                            return func(*args, **kwargs)
+                        else:
+                            return func(obj, *args, **kwargs)
+                else:
+                    return {'errors': result.errors}
 
         return wrapper
 
@@ -103,8 +162,12 @@ def validate(rule, raise_exceptions=False, is_class=False, mutate=False, **kwds)
 
 
 def validate_types(
-    func=None, raise_exceptions=True, is_class=False, mutate=False, **kwds
-):
+    func: Any = None,
+    raise_exceptions: bool = True,
+    is_class: bool = False,
+    mutate: bool = False,
+    **kwds: Any,
+) -> Any:
     """
     Decorator that validates function arguments against their type annotations.
 
@@ -115,70 +178,61 @@ def validate_types(
     """
 
     def decorator(f):
-        @wraps(f)
-        def wrapper(obj=EMPTY, *args, **kwargs):
-            func_data = OrderedDict()
-            func_defaults = OrderedDict()
-            func_defn = getfullargspec(f)
-            func_annotations = OrderedDict(
-                (k, v) for k, v in func_defn.annotations.items() if k != 'return'
-            )
-            obj_is_cls = (
-                True if (is_class == True or func_defn.args[0] == 'self') else False
-            )
-            clean_params = func_defn.args[1:] if obj_is_cls else func_defn.args
+        func_defn = getfullargspec(f)
+        func_annotations = OrderedDict(
+            (k, v) for k, v in func_defn.annotations.items() if k != 'return'
+        )
+        rules = [
+            {'type': 'annotation', 'object': func_annotations[key]}
+            for key in func_annotations
+        ]
 
-            func_data.update(
-                zip(clean_params, [EMPTY for x in range(len(clean_params))])
-            )
-
-            if func_defn.defaults:
-                defaults_dict = OrderedDict(
-                    zip(clean_params[-len(func_defn.defaults) :], func_defn.defaults)
+        if iscoroutinefunction(f):
+            @wraps(f)
+            async def wrapper(obj=EMPTY, *args, **kwargs):
+                func_data, func_defaults, obj_is_cls = _build_func_data(
+                    f, obj, args, kwargs, is_class
                 )
-                func_data.update(defaults_dict)
-                func_defaults.update(defaults_dict)
-
-            if not obj_is_cls:
-                func_data[clean_params[0]] = obj
-
-            if args:
-                if obj_is_cls:
-                    func_data.update(zip(clean_params, args))
-                else:
-                    func_data.update(zip(clean_params[1:], args))
-
-            if kwargs:
-                func_data.update(
-                    zip(
-                        [k for k in kwargs.keys() if k in set(func_data.keys())],
-                        kwargs.values(),
-                    )
+                result = validate_data(
+                    func_data, rules, raise_exceptions, func_defaults, mutate=mutate, **kwds
                 )
-
-            rules = [
-                {'type': 'annotation', 'object': func_annotations[key]}
-                for key in func_annotations
-            ]
-
-            result = validate_data(
-                func_data, rules, raise_exceptions, func_defaults, mutate=mutate, **kwds
-            )
-
-            if result.ok:
-                if mutate and hasattr(result, 'data') and result.data:
-                    transformed = result.data
-                    if obj_is_cls:
-                        return f(obj, *transformed, **kwargs)
+                if result.ok:
+                    if mutate and hasattr(result, 'data') and result.data:
+                        transformed = result.data
+                        if obj_is_cls:
+                            return await f(obj, *transformed, **kwargs)
+                        else:
+                            return await f(*transformed, **kwargs)
                     else:
-                        return f(*transformed, **kwargs)
+                        if isinstance(obj, EmptyObject):
+                            return await f(*args, **kwargs)
+                        else:
+                            return await f(obj, *args, **kwargs)
                 else:
-                    if isinstance(obj, EmptyObject):
-                        return f(*args, **kwargs)
+                    return {'errors': result.errors}
+        else:
+            @wraps(f)
+            def wrapper(obj=EMPTY, *args, **kwargs):
+                func_data, func_defaults, obj_is_cls = _build_func_data(
+                    f, obj, args, kwargs, is_class
+                )
+                result = validate_data(
+                    func_data, rules, raise_exceptions, func_defaults, mutate=mutate, **kwds
+                )
+                if result.ok:
+                    if mutate and hasattr(result, 'data') and result.data:
+                        transformed = result.data
+                        if obj_is_cls:
+                            return f(obj, *transformed, **kwargs)
+                        else:
+                            return f(*transformed, **kwargs)
                     else:
-                        return f(obj, *args, **kwargs)
-            else:
-                return {'errors': result.errors}
+                        if isinstance(obj, EmptyObject):
+                            return f(*args, **kwargs)
+                        else:
+                            return f(obj, *args, **kwargs)
+                else:
+                    return {'errors': result.errors}
 
         return wrapper
 
@@ -192,8 +246,15 @@ def validate_types(
 
 
 def validate_data(
-    data, rule, raise_exceptions=False, defaults={}, mutate=False, **kwds
-):
+    data: str | list[Any] | tuple[Any, ...] | dict[str, Any],
+    rule: str | dict[str, Any] | list[str | dict[str, Any]],
+    raise_exceptions: bool = False,
+    defaults: dict[str, Any] | None = None,
+    mutate: bool = False,
+    **kwds: Any,
+) -> ValidationResult:
+    if defaults is None:
+        defaults = {}
     expanded_rule = expand_rule(rule)
     is_nested = _has_nested_rules(
         expanded_rule if isinstance(expanded_rule, list) else rule
@@ -211,8 +272,10 @@ def validate_data(
     if isinstance(expanded_rule, (dict, OrderedDict)):
         dict_rules = []
         ordered_data = OrderedDict()
-        for key in expanded_rule['keys']:
-            dict_rules.append(expanded_rule['keys'][key])
+        field_map = expanded_rule['keys'] if 'keys' in expanded_rule else expanded_rule
+        for key in field_map:
+            rule = field_map[key]
+            dict_rules.append(expand_rule(rule)[0] if isinstance(rule, str) else rule)
             ordered_data[key] = data.get(key, EMPTY)
 
         expanded_rule = dict_rules
@@ -223,7 +286,192 @@ def validate_data(
     return result
 
 
-def expand_rule(rule):
+# ---------------------------------------------------------------------------
+# Pipe-syntax shorthand parser
+# ---------------------------------------------------------------------------
+
+_PIPE_BARE_KEYWORDS = frozenset({
+    'strict', 'nullable', 'unique',
+    'strip', 'lstrip', 'rstrip', 'lower', 'upper', 'title',
+})
+
+_PIPE_VALUE_KEYWORDS = frozenset({
+    'min:', 'max:', 'between:', 'in:', 'not_in:',
+    'starts_with:', 'ends_with:', 'contains:',
+    'format:', 're:', 'msg:',
+})
+
+_TRANSFORM_MAP = {
+    'strip':  str.strip,
+    'lstrip': str.lstrip,
+    'rstrip': str.rstrip,
+    'lower':  str.lower,
+    'upper':  str.upper,
+    'title':  str.title,
+}
+
+_BOOL_FLAGS = frozenset({'strict', 'nullable', 'unique'})
+
+_CSV_KEYS = {'in': 'options', 'not_in': 'excludes'}
+
+_VALUE_KEYS = {
+    'contains':    'contains',
+    'format':      'format',
+    're':          'expression',
+    'starts_with': 'startswith',
+    'ends_with':   'endswith',
+}
+
+
+def _is_pipe_delimiter(s, pos):
+    """Return True if the | at pos is a recognised modifier boundary."""
+    rest = s[pos + 1:]
+    for kw in _PIPE_VALUE_KEYWORDS:
+        if rest.startswith(kw):
+            return True
+    for kw in _PIPE_BARE_KEYWORDS:
+        if rest.startswith(kw):
+            after = rest[len(kw):]
+            if after == '' or after[0] == '|':
+                return True
+    return False
+
+
+def _pipe_tokenize(s):
+    """Split s on | only where followed by a recognised modifier keyword.
+    The type token is always split at the first | unconditionally."""
+    first_pipe = s.find('|')
+    if first_pipe == -1:
+        return [s]
+
+    tokens = [s[:first_pipe]]
+    rest = s[first_pipe + 1:]
+    start = 0
+    pos = rest.find('|')
+    while pos != -1:
+        if _is_pipe_delimiter(rest, pos):
+            tokens.append(rest[start:pos])
+            start = pos + 1
+        pos = rest.find('|', pos + 1)
+    tokens.append(rest[start:])
+    return tokens
+
+
+def _coerce_range_val(v: str) -> int | float | str:
+    """Convert a range bound string to int, float, or leave as-is (dates, 'any')."""
+    if v == 'any':
+        return 'any'
+    try:
+        return float(v) if '.' in v else int(v)
+    except (ValueError, TypeError):
+        return v
+
+
+def _chain_transforms(fns: list[Any]) -> Any:
+    def apply(v):
+        for fn in fns:
+            v = fn(v)
+        return v
+    return apply
+
+
+def _expand_pipe_rule(rule: str) -> dict[str, Any]:
+    """Parse a pipe-syntax shorthand rule string into an expanded rule dict."""
+    tokens = _pipe_tokenize(rule)
+
+    # --- type token ---
+    type_token = tokens[0].strip()
+    all_types = set(BASIC_TYPES + EXTENDED_TYPES)
+    if type_token not in all_types:
+        raise TypeError(f'{type_token!r} is not a supported type')
+
+    rule_dict = {'type': type_token}
+    transforms = []
+    seen_validator = False
+    min_val = None
+    max_val = None
+
+    def _require_value(k: str, v: str | None) -> str:
+        if v is None:
+            raise ValueError(f'{k!r} requires a value in rule: {rule!r}')
+        return v
+
+    def _split_csv(v: str) -> tuple[str, ...]:
+        return tuple(item.strip() for item in v.split(','))
+
+    for token in tokens[1:]:
+        key, _, value = token.partition(':')
+        key = key.strip()
+        value = value or None
+
+        # --- transforms must precede validators ---
+        if key in _TRANSFORM_MAP:
+            if seen_validator:
+                raise ValueError(
+                    f'Transform {key!r} must come before validators in rule: {rule!r}'
+                )
+            transforms.append(_TRANSFORM_MAP[key])
+            continue
+
+        seen_validator = True
+
+        if key in _BOOL_FLAGS:
+            rule_dict[key] = True
+
+        elif key in _CSV_KEYS:
+            rule_dict[_CSV_KEYS[key]] = _split_csv(_require_value(key, value))
+
+        elif key in _VALUE_KEYS:
+            rule_dict[_VALUE_KEYS[key]] = _require_value(key, value)
+
+        elif key == 'msg':
+            rule_dict['message'] = value or ''
+
+        elif key == 'min':
+            min_val = _require_value(key, value)
+
+        elif key == 'max':
+            max_val = _require_value(key, value)
+
+        elif key == 'between':
+            if min_val is not None or max_val is not None:
+                raise ValueError(
+                    f'Cannot combine "between" with "min" or "max" in rule: {rule!r}'
+                )
+            parts = value.split(',', 1) if value else []
+            if len(parts) != 2:
+                raise ValueError(
+                    f'"between" requires two comma-separated values in rule: {rule!r}'
+                )
+            rule_dict['range'] = (
+                _coerce_range_val(parts[0].strip()),
+                _coerce_range_val(parts[1].strip()),
+            )
+
+        else:
+            raise ValueError(f'Unknown modifier {key!r} in rule: {rule!r}')
+
+    # --- resolve min/max into range ---
+    if min_val is not None or max_val is not None:
+        if 'range' in rule_dict:
+            raise ValueError(
+                f'Cannot combine "between" with "min" or "max" in rule: {rule!r}'
+            )
+        rule_dict['range'] = (
+            _coerce_range_val(min_val) if min_val is not None else 'any',
+            _coerce_range_val(max_val) if max_val is not None else 'any',
+        )
+
+    # --- attach transforms ---
+    if transforms:
+        rule_dict['transform'] = (
+            transforms[0] if len(transforms) == 1 else _chain_transforms(transforms)
+        )
+
+    return rule_dict
+
+
+def expand_rule(rule: str | dict[str, Any] | list[str | dict[str, Any]]) -> list[dict[str, Any]] | dict[str, Any]:
     expanded_rules = []
 
     if not isinstance(rule, (str, tuple, list, dict)):
@@ -233,6 +481,9 @@ def expand_rule(rule):
         raise ValueError(f'Invalid rule {rule}')
 
     def expand_rule_string(rule):
+        if '|' in rule:
+            return _expand_pipe_rule(rule)
+
         rule_dict = {}
         _type = rule.split(':')[0].strip() if ':' in rule else rule
 
@@ -268,10 +519,12 @@ def expand_rule(rule):
         expanded_rules.append(expand_rule_string(rule))
 
     elif isinstance(rule, (dict, OrderedDict)):
-        if 'keys' not in rule:
-            expanded_rules.append(rule)
+        if 'keys' in rule:
+            expanded_rules = rule          # canonical form: {'keys': {...}, ...}
+        elif 'type' in rule:
+            expanded_rules.append(rule)    # single rule dict e.g. {'type': 'str'}
         else:
-            expanded_rules = rule
+            expanded_rules = rule          # bare field-map e.g. {'username': 'str|min:3'}
 
     else:
         for _rule in rule:
