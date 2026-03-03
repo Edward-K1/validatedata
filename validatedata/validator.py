@@ -748,9 +748,11 @@ class Validator:
 
         elif self._type in ('list', 'tuple'):
             self.error_key = ErrorKeys.LIST_OR_TUPLE_NOT_IN_RANGE
+            min_len = 0 if self.rule_value[0] == 'any' else self.rule_value[0]
+            max_len = float('inf') if self.rule_value[1] == 'any' else self.rule_value[1]
             if not (
-                len(self.data_value) >= self.rule_value[0]
-                and len(self.data_value) <= self.rule_value[1]
+                len(self.data_value) >= min_len
+                and len(self.data_value) <= max_len
             ):
                 self.append_error(path=path)
 
@@ -870,6 +872,7 @@ class Validator:
         status = False
 
         def append_type_error(error_key=ErrorKeys.INVALID_TYPE):
+            nonlocal status
             true_type = data_type
             if true_type == 'annotation':
                 true_type = rules['object'].__qualname__
@@ -886,6 +889,7 @@ class Validator:
             else:
                 formatted = custom_message or raw_error
 
+            status = False
             if append_errors:
                 self._store_error(path or field_name, formatted)
 

@@ -249,10 +249,12 @@ def validate_data(
     data: str | list[Any] | tuple[Any, ...] | dict[str, Any],
     rule: str | dict[str, Any] | list[str | dict[str, Any]],
     raise_exceptions: bool = False,
-    defaults: dict[str, Any] = {},
+    defaults: dict[str, Any] | None = None,
     mutate: bool = False,
     **kwds: Any,
 ) -> ValidationResult:
+    if defaults is None:
+        defaults = {}
     expanded_rule = expand_rule(rule)
     is_nested = _has_nested_rules(
         expanded_rule if isinstance(expanded_rule, list) else rule

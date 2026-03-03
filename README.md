@@ -330,6 +330,8 @@ Any supported type name is valid as the first token:
 
 `min` and `max` can be used independently for open bounds. `between` is a convenience alias for `min` + `max` together — they cannot be combined.
 
+> **Note:** `validatedata` does not impose a maximum size on lists or tuples. If you are validating untrusted input in a web API or other public-facing context, always set an explicit upper bound to prevent memory exhaustion from unexpectedly large payloads.
+
 #### Enums and exclusions
 
 ```python
@@ -492,6 +494,8 @@ rules = [
 ## Range Rule
 
 The `'any'` keyword is used as an open bound:
+
+> **Note:** `validatedata` does not impose a maximum size on lists or tuples. If you are validating untrusted input in a web API or other public-facing context, always set an explicit upper bound to prevent memory exhaustion from unexpectedly large payloads.
 
 ```python
 {'type': 'int', 'range': (1, 'any')}               # >= 1, no upper limit
@@ -890,6 +894,7 @@ This helps avoid duplicate effort and lets us align on scope and approach before
 ### Getting Started
 
 1. Open an issue describing what you'd like to add or change
+2. You'll be informed if there's someone working on it and given the green light if it's the right call
 2. Fork the repository and create a branch off `main`
 ```
    git checkout -b feature/your-feature-name
