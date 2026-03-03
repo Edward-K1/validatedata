@@ -33,13 +33,6 @@ rule={'keys': {
 }}
 
 
-# # or dict form
-# rule={'keys': {
-#     'username': {'type': 'str', 'range': (3, 32)},
-#     'email': {'type': 'email'},
-#     'age': {'type': 'int', 'range': (18, 'any')}
-# }}
-
 result = validate_data(
     data={'username': 'alice', 'email': 'alice@example.com', 'age': 25},
     rule=rule
@@ -50,6 +43,18 @@ if result.ok:
 else:
     print(result.errors)
 ```
+
+> **Python 3.7+:** For simple cases you can omit the `keys` wrapper and pass a bare field map directly:
+>
+> ```python
+> rule = {
+>     'username': 'str|min:3|max:32',
+>     'email': 'email',
+>     'age': 'int|min:18',
+> }
+> ```
+>
+> The `keys` form is recommended when you need to pair field rules with top-level options (such as `strict_keys` in a future release).
 
 ---
 

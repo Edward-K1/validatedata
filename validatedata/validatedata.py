@@ -272,8 +272,9 @@ def validate_data(
     if isinstance(expanded_rule, (dict, OrderedDict)):
         dict_rules = []
         ordered_data = OrderedDict()
-        for key in expanded_rule['keys']:
-            rule = expanded_rule['keys'][key]
+        field_map = expanded_rule['keys'] if 'keys' in expanded_rule else expanded_rule
+        for key in field_map:
+            rule = field_map[key]
             dict_rules.append(expand_rule(rule)[0] if isinstance(rule, str) else rule)
             ordered_data[key] = data.get(key, EMPTY)
 
@@ -528,10 +529,12 @@ def expand_rule(rule: str | dict[str, Any] | list[str | dict[str, Any]]) -> list
         expanded_rules.append(expand_rule_string(rule))
 
     elif isinstance(rule, (dict, OrderedDict)):
-        if 'keys' not in rule:
-            expanded_rules.append(rule)
+        if 'keys' in rule:
+            expanded_rules = rule          # canonical form: {'keys': {...}, ...}
+        elif 'type' in rule:
+            expanded_rules.append(rule)    # single rule dict e.g. {'type': 'str'}
         else:
-            expanded_rules = rule
+            expanded_rules = rule          # bare field-map e.g. {'username': 'str|min:3'}
 
     else:
         for _rule in rule:
