@@ -310,6 +310,18 @@ _TRANSFORM_MAP = {
     'title':  str.title,
 }
 
+_BOOL_FLAGS = frozenset({'strict', 'nullable', 'unique'})
+
+_CSV_KEYS = {'in': 'options', 'not_in': 'excludes'}
+
+_VALUE_KEYS = {
+    'contains':    'contains',
+    'format':      'format',
+    're':          'expression',
+    'starts_with': 'startswith',
+    'ends_with':   'endswith',
+}
+
 
 def _is_pipe_delimiter(s, pos):
     """Return True if the | at pos is a recognised modifier boundary."""
@@ -403,14 +415,17 @@ def _expand_pipe_rule(rule: str) -> dict[str, Any]:
 
         seen_validator = True
 
-        if key == 'strict':
-            rule_dict['strict'] = True
+        if key in _BOOL_FLAGS:
+            rule_dict[key] = True
 
-        elif key == 'nullable':
-            rule_dict['nullable'] = True
+        elif key in _CSV_KEYS:
+            rule_dict[_CSV_KEYS[key]] = _split_csv(_require_value(key, value))
 
-        elif key == 'unique':
-            rule_dict['unique'] = True
+        elif key in _VALUE_KEYS:
+            rule_dict[_VALUE_KEYS[key]] = _require_value(key, value)
+
+        elif key == 'msg':
+            rule_dict['message'] = value or ''
 
         elif key == 'min':
             min_val = _require_value(key, value)
@@ -432,31 +447,6 @@ def _expand_pipe_rule(rule: str) -> dict[str, Any]:
                 _coerce_range_val(parts[0].strip()),
                 _coerce_range_val(parts[1].strip()),
             )
-
-        elif key == 'in':
-            rule_dict['options'] = _split_csv(_require_value(key, value))
-
-        elif key == 'not_in':
-            rule_dict['excludes'] = _split_csv(_require_value(key, value))
-
-        elif key == 'starts_with':
-            rule_dict['startswith'] = _require_value(key, value)
-
-        elif key == 'ends_with':
-            rule_dict['endswith'] = _require_value(key, value)
-
-        elif key == 'contains':
-            rule_dict['contains'] = _require_value(key, value)
-
-        elif key == 'format':
-            rule_dict['format'] = _require_value(key, value)
-
-        elif key == 're':
-            # value is everything after the first colon — colons in pattern are safe
-            rule_dict['expression'] = _require_value(key, value)
-
-        elif key == 'msg':
-            rule_dict['message'] = value or ''
 
         else:
             raise ValueError(f'Unknown modifier {key!r} in rule: {rule!r}')
