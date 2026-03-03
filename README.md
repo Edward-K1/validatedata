@@ -112,6 +112,19 @@ user.signup('alice_99', 'alice@example.com', 'Secure@123')  # works
 user.signup('alice_99', 'not-an-email', 'weak')              # raises ValidationError
 ```
 
+Async functions are supported. The decorator behaves identically:
+```python
+from validatedata import validate
+
+@validate(signup_rules, raise_exceptions=True)
+async def signup(self, username, email, password):
+    await db.save(username, email, password)
+    return 'Account Created'
+```
+
+`validate_types` works the same way with async functions.
+
+
 Class methods:
 
 ```python
