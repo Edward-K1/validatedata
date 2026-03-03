@@ -376,6 +376,14 @@ def _expand_pipe_rule(rule: str) -> dict[str, Any]:
     min_val = None
     max_val = None
 
+    def _require_value(k: str, v: str | None) -> str:
+        if v is None:
+            raise ValueError(f'{k!r} requires a value in rule: {rule!r}')
+        return v
+
+    def _split_csv(v: str) -> tuple[str, ...]:
+        return tuple(item.strip() for item in v.split(','))
+
     for token in tokens[1:]:
         key, _, value = token.partition(':')
         key = key.strip()
@@ -402,14 +410,10 @@ def _expand_pipe_rule(rule: str) -> dict[str, Any]:
             rule_dict['unique'] = True
 
         elif key == 'min':
-            if value is None:
-                raise ValueError(f'min requires a value in rule: {rule!r}')
-            min_val = value
+            min_val = _require_value(key, value)
 
         elif key == 'max':
-            if value is None:
-                raise ValueError(f'max requires a value in rule: {rule!r}')
-            max_val = value
+            max_val = _require_value(key, value)
 
         elif key == 'between':
             if min_val is not None or max_val is not None:
@@ -427,40 +431,26 @@ def _expand_pipe_rule(rule: str) -> dict[str, Any]:
             )
 
         elif key == 'in':
-            if value is None:
-                raise ValueError(f'"in" requires a value in rule: {rule!r}')
-            rule_dict['options'] = tuple(v.strip() for v in value.split(','))
+            rule_dict['options'] = _split_csv(_require_value(key, value))
 
         elif key == 'not_in':
-            if value is None:
-                raise ValueError(f'"not_in" requires a value in rule: {rule!r}')
-            rule_dict['excludes'] = tuple(v.strip() for v in value.split(','))
+            rule_dict['excludes'] = _split_csv(_require_value(key, value))
 
         elif key == 'starts_with':
-            if value is None:
-                raise ValueError(f'"starts_with" requires a value in rule: {rule!r}')
-            rule_dict['startswith'] = value
+            rule_dict['startswith'] = _require_value(key, value)
 
         elif key == 'ends_with':
-            if value is None:
-                raise ValueError(f'"ends_with" requires a value in rule: {rule!r}')
-            rule_dict['endswith'] = value
+            rule_dict['endswith'] = _require_value(key, value)
 
         elif key == 'contains':
-            if value is None:
-                raise ValueError(f'"contains" requires a value in rule: {rule!r}')
-            rule_dict['contains'] = value
+            rule_dict['contains'] = _require_value(key, value)
 
         elif key == 'format':
-            if value is None:
-                raise ValueError(f'"format" requires a value in rule: {rule!r}')
-            rule_dict['format'] = value
+            rule_dict['format'] = _require_value(key, value)
 
         elif key == 're':
             # value is everything after the first colon — colons in pattern are safe
-            if value is None:
-                raise ValueError(f'"re" requires a pattern in rule: {rule!r}')
-            rule_dict['expression'] = value
+            rule_dict['expression'] = _require_value(key, value)
 
         elif key == 'msg':
             rule_dict['message'] = value or ''
