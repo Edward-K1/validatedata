@@ -6,12 +6,20 @@ integrates with the existing test suite without any extra dependencies.
 
 """
 
+import sys
 import unittest
 from inspect import iscoroutinefunction
 
 from validatedata.validatedata import validate, validate_types
 from validatedata.validator import ValidationError
 from .base import BaseTest
+
+
+_async_test_case = (
+    unittest.IsolatedAsyncioTestCase
+    if sys.version_info >= (3, 8)
+    else unittest.SkipTest
+)
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +91,7 @@ class TestSyncValidateTypes(BaseTest):
 # Async — @validate on async functions and class methods
 # ---------------------------------------------------------------------------
 
-class TestAsyncValidate(unittest.IsolatedAsyncioTestCase):
+class TestAsyncValidate(_async_test_case):
 
     async def test_valid_input(self):
         class UserService:
@@ -132,7 +140,7 @@ class TestAsyncValidate(unittest.IsolatedAsyncioTestCase):
 # Async — @validate_types on async functions and class methods
 # ---------------------------------------------------------------------------
 
-class TestAsyncValidateTypes(unittest.IsolatedAsyncioTestCase):
+class TestAsyncValidateTypes(_async_test_case):
 
     async def test_valid_input(self):
         class Greeter:
