@@ -71,8 +71,10 @@ class TestCore(BaseTest):
             expand_rule('notavalidtype')
 
     def test_expand_rule_too_short_raises(self):
+        # Single-char strings are always invalid; the guard requires len >= 2
+        # so that valid 2-char types like 'ip' are not incorrectly rejected.
         with self.assertRaises(ValueError):
-            expand_rule('ab')
+            expand_rule('a')
 
     def test_type_decorator(self):
         class User:

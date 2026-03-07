@@ -303,11 +303,20 @@ def _has_nested_rules(rules):
         )
     if isinstance(rules, dict):
         if 'keys' in rules:
-            return any(
-                isinstance(v, dict) and ('fields' in v or 'items' in v)
-                for v in rules['keys'].values()
-            )
-        return 'fields' in rules or 'items' in rules
+            def _is_nested_value(v):
+                if not isinstance(v, dict):
+                    return False
+                if 'fields' in v or 'items' in v:
+                    return True
+                # Shorthand: plain dict without 'type' whose values are field rules
+                return 'type' not in v and any(isinstance(fv, (str, dict)) for fv in v.values())
+            return any(_is_nested_value(v) for v in rules['keys'].values())
+        if 'fields' in rules or 'items' in rules:
+            return True
+        # Shorthand nested: a plain dict whose values are field rules (not a single rule dict)
+        if 'type' not in rules:
+            return any(isinstance(v, (str, dict)) for v in rules.values())
+        return False
     return False
 
 
@@ -418,9 +427,14 @@ class Validator:
                 return value, True
             nested_rules = list(fields.values())
             nested_data = OrderedDict((k, value.get(k)) for k in fields.keys())
+            start = len(self.transformed_data)
             nested_result = self.validate_object(
                 nested_data, nested_rules, {}, parent_path=path
             )
+            if self.mutate:
+                sub_values = self.transformed_data[start:]
+                del self.transformed_data[start:]
+                return dict(zip(fields.keys(), sub_values)), nested_result.ok
             return value, nested_result.ok
 
         def handle_nested_list(value, current_rules, path):
@@ -481,9 +495,9 @@ class Validator:
                     continue
 
                 if current_rules.get('fields'):
-                    handle_nested_dict(transformed_value, current_rules, path)
+                    mutated_value, _ = handle_nested_dict(transformed_value, current_rules, path)
                     self.transformed_data.append(
-                        transformed_value if self.mutate else value
+                        mutated_value if self.mutate else value
                     )
                     continue
 
@@ -523,9 +537,9 @@ class Validator:
                 transformed_value = apply_transform(value, current_rules)
 
                 if current_rules.get('fields'):
-                    handle_nested_dict(transformed_value, current_rules, path)
+                    mutated_value, _ = handle_nested_dict(transformed_value, current_rules, path)
                     self.transformed_data.append(
-                        transformed_value if self.mutate else value
+                        mutated_value if self.mutate else value
                     )
                     continue
 

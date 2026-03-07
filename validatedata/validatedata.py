@@ -275,7 +275,24 @@ def validate_data(
         field_map = expanded_rule['keys'] if 'keys' in expanded_rule else expanded_rule
         for key in field_map:
             rule = field_map[key]
-            dict_rules.append(expand_rule(rule)[0] if isinstance(rule, str) else rule)
+            if isinstance(rule, str):
+                dict_rules.append(expand_rule(rule)[0])
+            elif (
+                isinstance(rule, dict)
+                and 'type' not in rule
+                and 'fields' not in rule
+                and 'items' not in rule
+            ):
+                # Shorthand nested field map e.g. {'name': 'str|min:3', 'version': 'semver'}
+                # Convert to canonical nested form so the validator recurses into sub-fields.
+                dict_rules.append({
+                    'fields': {
+                        k: (expand_rule(v)[0] if isinstance(v, str) else v)
+                        for k, v in rule.items()
+                    }
+                })
+            else:
+                dict_rules.append(rule)
             ordered_data[key] = data.get(key, EMPTY)
 
         expanded_rule = dict_rules
@@ -477,7 +494,7 @@ def expand_rule(rule: str | dict[str, Any] | list[str | dict[str, Any]]) -> list
     if not isinstance(rule, (str, tuple, list, dict)):
         raise TypeError('Validation rule(s) must be of type: str, tuple, list, or dict')
 
-    if len(str(rule)) < 3:
+    if len(str(rule)) < 2:
         raise ValueError(f'Invalid rule {rule}')
 
     def expand_rule_string(rule):
