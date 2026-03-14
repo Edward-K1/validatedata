@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, os.path.abspath('..'))
 
 project = 'validatedata'
-copyright = '2024, Edward Kigozi'
+copyright = '2021, Edward Kigozi'
 author = 'Edward Kigozi'
 release = '0.4.0'
 

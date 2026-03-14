@@ -72,8 +72,7 @@ marker — wrap the field map in ``{'keys': {...}}``:
        'age': 'int|min:18',
    }}
 
-Both forms behave identically today. The ``keys`` form is recommended as the
-library grows.
+Both forms behave identically today.
 
 ----
 
