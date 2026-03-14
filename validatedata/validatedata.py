@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import difflib
+
 from collections import OrderedDict
 from functools import wraps
 from inspect import getfullargspec, iscoroutinefunction
@@ -45,6 +47,67 @@ BASIC_TYPES = (
 )
 EXTENDED_TYPES = ('dict', 'list', 'object', 'annotation', 'regex', 'set', 'tuple')
 NATIVE_TYPES = (bool, float, int, str, dict, list, set, tuple)
+
+
+
+# ---------------------------------------------------------------------------
+# Rule-key allowlist and early validation
+# ---------------------------------------------------------------------------
+
+# All keys that may legally appear in a rule dict.
+# Anything ending in '-message' is also allowed (e.g. 'range-message').
+VALID_RULE_KEYS: frozenset[str] = frozenset({
+    # identity / type
+    'type',
+    'object',
+    # structure
+    'fields',
+    'items',
+    # scalar validators
+    'length',
+    'range',
+    'options',
+    'excludes',
+    'expression',
+    'contains',
+    'startswith',
+    'endswith',
+    'unique',
+    # modifiers / flags
+    'strict',
+    'nullable',
+    'format',
+    'region',
+    # transforms
+    'transform',
+    'mutate',
+    # conditional
+    'depends_on',
+    # messages
+    'message',
+})
+
+
+def _check_rule_dict(rule: dict[str, Any], path: str = '') -> None:
+    """Raise ValueError for any unrecognised key in a rule dict.
+
+    Valid keys are those in VALID_RULE_KEYS plus any key ending in '-message'
+    (e.g. 'range-message', 'expression-message').  For each unknown key a
+    did-you-mean suggestion is included when a close match exists.
+    """
+    unknown = [k for k in rule if k not in VALID_RULE_KEYS and not k.endswith('-message')]
+    if not unknown:
+        return
+
+    all_valid = list(VALID_RULE_KEYS) + ['<key>-message']
+    messages = []
+    for key in unknown:
+        location = f" in rule at '{path}'" if path else ' in rule'
+        suggestion = difflib.get_close_matches(key, VALID_RULE_KEYS, n=1, cutoff=0.6)
+        hint = f" Did you mean '{suggestion[0]}'?" if suggestion else ''
+        messages.append(f"Unknown rule key '{key}'{location}.{hint}")
+
+    raise ValueError('\n'.join(messages))
 
 
 class EmptyObject:
@@ -279,6 +342,9 @@ def _expand_shorthand_rule(
                 for k, v in rule.items()
             }
         }
+
+    # Explicit rule dict — validate its keys before expanding further
+    _check_rule_dict(rule, path=path)
 
     # rule with fields — recurse into field values
     if 'fields' in rule:
@@ -583,6 +649,7 @@ def expand_rule(rule: str | dict[str, Any] | list[str | dict[str, Any]]) -> list
         if 'keys' in rule:
             expanded_rules = rule          # canonical form: {'keys': {...}, ...}
         elif 'type' in rule:
+            _check_rule_dict(rule)
             expanded_rules.append(rule)    # single rule dict e.g. {'type': 'str'}
         else:
             expanded_rules = rule          # bare field-map e.g. {'username': 'str|min:3'}
@@ -592,6 +659,7 @@ def expand_rule(rule: str | dict[str, Any] | list[str | dict[str, Any]]) -> list
             if isinstance(_rule, str):
                 expanded_rules.append(expand_rule_string(_rule))
             elif isinstance(_rule, dict):
+                _check_rule_dict(_rule)
                 expanded_rules.append(_rule)
             else:
                 raise TypeError('Error expanding rules: expecting string or dict')

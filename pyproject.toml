@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "validatedata"
-version = "0.3.0"
+version = "0.4.0"
 authors = [
   { name="Edward Kigozi", email="edwardinbytes@gmail.com" },
 ]
@@ -26,6 +26,8 @@ classifiers = [
 Homepage = "https://github.com/Edward-K1/validatedata"
 Repository = "https://github.com/Edward-K1/validatedata.git"
 Issues = "https://github.com/Edward-K1/validatedata/issues"
+Documentation = "https://validatedata.readthedocs.io"
+
 
 [tool.setuptools]
 packages = ["validatedata"]
