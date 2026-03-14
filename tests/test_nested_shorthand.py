@@ -171,10 +171,10 @@ class TestNestedShorthandMutate(BaseTest):
             mutate=True,
         )
         self.assertTrue(result.ok)
-        self.assertEqual(result.data, [
-            {'name': 'QuickScript', 'version': '1.0.0'},
-            {'host': '127.0.0.1', 'port': 5432},
-        ])
+        self.assertEqual(result.data, {
+            'app': {'name': 'QuickScript', 'version': '1.0.0'},
+            'database': {'host': '127.0.0.1', 'port': 5432},
+        })
 
     def test_mutate_preserves_nested_dict_structure(self):
         """result.data must be a list of dicts, not a flat list of leaf values."""
@@ -184,9 +184,9 @@ class TestNestedShorthandMutate(BaseTest):
             mutate=True,
         )
         self.assertEqual(len(result.data), 1)
-        self.assertIsInstance(result.data[0], dict)
-        self.assertIn('name', result.data[0])
-        self.assertIn('version', result.data[0])
+        self.assertIsInstance(result.data['app'], dict)
+        self.assertIn('name', result.data['app'])
+        self.assertIn('version', result.data['app'])
 
     def test_mutate_with_transform_in_nested_field(self):
         """Transforms on nested fields should be reflected in the reconstructed dict."""
@@ -196,7 +196,7 @@ class TestNestedShorthandMutate(BaseTest):
             mutate=True,
         )
         self.assertTrue(result.ok)
-        self.assertEqual(result.data[0]['name'], 'quickscript')
+        self.assertEqual(result.data['app']['name'], 'quickscript')
 
     def test_mutate_invalid_data_has_no_data_key(self):
         """When validation fails, result.data should still be present but reflect input."""
@@ -207,7 +207,7 @@ class TestNestedShorthandMutate(BaseTest):
         )
         self.assertFalse(result.ok)
         # data is present even on failure — it should still be a list of dicts
-        self.assertIsInstance(result.data[0], dict)
+        self.assertIsInstance(result.data['app'], dict)
 
     def test_mutate_false_has_no_data_attribute(self):
         result = validate_data(
@@ -273,7 +273,7 @@ class TestNestedShorthandRecursion(BaseTest):
             mutate=True,
         )
         self.assertTrue(result.ok)
-        self.assertEqual(result.data, [{'address': {'postcode': 'AB1 2CD'}}])
+        self.assertEqual(result.data, {'company': {'address': {'postcode': 'AB1 2CD'}}})
 
     def test_mutate_three_levels(self):
         result = validate_data(
@@ -282,7 +282,7 @@ class TestNestedShorthandRecursion(BaseTest):
             mutate=True,
         )
         self.assertTrue(result.ok)
-        self.assertEqual(result.data, [{'b': {'c': {'value': 42}}}])
+        self.assertEqual(result.data, {'a': {'b': {'c': {'value': 42}}}})
 
     def test_mutate_with_transform_propagates_through_levels(self):
         result = validate_data(
@@ -291,7 +291,7 @@ class TestNestedShorthandRecursion(BaseTest):
             mutate=True,
         )
         self.assertTrue(result.ok)
-        self.assertEqual(result.data[0]['profile']['name'], 'alice')
+        self.assertEqual(result.data['user']['profile']['name'], 'alice')
 
     def test_ten_levels_allowed(self):
         """Nesting up to MAX_NESTING_DEPTH levels must not raise."""
