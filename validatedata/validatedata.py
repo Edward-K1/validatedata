@@ -5,7 +5,7 @@ from functools import wraps
 from inspect import getfullargspec, iscoroutinefunction
 from typing import Any
 
-from .validator import Validator, ValidationError, _has_nested_rules
+from .validator import Validator, ValidationError, _has_nested_rules, MAX_NESTING_DEPTH
 
 
 class ValidationResult:
@@ -245,6 +245,68 @@ def validate_types(
     return decorator
 
 
+def _expand_shorthand_rule(
+    rule: str | dict[str, Any],
+    path: str = '',
+    depth: int = 0,
+) -> dict[str, Any]:
+    """Recursively convert shorthand nested dicts to {'fields': {...}} form.
+
+    A dict whose values are field rules (no 'type', 'fields', or 'items' key) is
+    treated as a nested field map and wrapped in {'fields': {...}}.  Recursion is
+    capped at MAX_NESTING_DEPTH levels; a descriptive ValueError is raised if that
+    limit is exceeded.
+    """
+    if depth >= MAX_NESTING_DEPTH:
+        path_info = f" at '{path}'" if path else ''
+        raise ValueError(
+            f'Maximum nesting depth of {MAX_NESTING_DEPTH} exceeded{path_info}'
+        )
+
+    if isinstance(rule, str):
+        return expand_rule(rule)[0]
+
+    if not isinstance(rule, dict):
+        return rule
+
+    child_path = lambda k: f'{path}.{k}' if path else k  # noqa: E731
+
+    # Shorthand: plain dict without type/fields/items — treat as nested field map
+    if 'type' not in rule and 'fields' not in rule and 'items' not in rule:
+        return {
+            'fields': {
+                k: _expand_shorthand_rule(v, child_path(k), depth + 1)
+                for k, v in rule.items()
+            }
+        }
+
+    # rule with fields — recurse into field values
+    if 'fields' in rule:
+        return {
+            **rule,
+            'fields': {
+                k: _expand_shorthand_rule(v, child_path(k), depth + 1)
+                for k, v in rule['fields'].items()
+            }
+        }
+
+    # rule with items that itself has fields — recurse into those fields
+    if 'items' in rule and isinstance(rule['items'], dict) and 'fields' in rule['items']:
+        items_path = f'{path}[]' if path else '[]'
+        return {
+            **rule,
+            'items': {
+                **rule['items'],
+                'fields': {
+                    k: _expand_shorthand_rule(v, f'{items_path}.{k}', depth + 1)
+                    for k, v in rule['items']['fields'].items()
+                }
+            }
+        }
+
+    return rule
+
+
 def validate_data(
     data: str | list[Any] | tuple[Any, ...] | dict[str, Any],
     rule: str | dict[str, Any] | list[str | dict[str, Any]],
@@ -256,9 +318,20 @@ def validate_data(
     if defaults is None:
         defaults = {}
     expanded_rule = expand_rule(rule)
-    is_nested = _has_nested_rules(
-        expanded_rule if isinstance(expanded_rule, list) else rule
-    )
+
+    # Expand shorthand nested dicts before nested-detection so _has_nested_rules
+    # only needs to understand {'fields': {...}} form.
+    if isinstance(expanded_rule, (dict, OrderedDict)):
+        dict_rules = []
+        ordered_data = OrderedDict()
+        field_map = expanded_rule['keys'] if 'keys' in expanded_rule else expanded_rule
+        for key in field_map:
+            dict_rules.append(_expand_shorthand_rule(field_map[key], path=key))
+            ordered_data[key] = data.get(key, EMPTY)
+        expanded_rule = dict_rules
+        data = ordered_data
+
+    is_nested = _has_nested_rules(expanded_rule)
     validator = Validator(
         NATIVE_TYPES,
         BASIC_TYPES,
@@ -268,35 +341,6 @@ def validate_data(
         nested=is_nested,
         **kwds,
     )
-
-    if isinstance(expanded_rule, (dict, OrderedDict)):
-        dict_rules = []
-        ordered_data = OrderedDict()
-        field_map = expanded_rule['keys'] if 'keys' in expanded_rule else expanded_rule
-        for key in field_map:
-            rule = field_map[key]
-            if isinstance(rule, str):
-                dict_rules.append(expand_rule(rule)[0])
-            elif (
-                isinstance(rule, dict)
-                and 'type' not in rule
-                and 'fields' not in rule
-                and 'items' not in rule
-            ):
-                # Shorthand nested field map e.g. {'name': 'str|min:3', 'version': 'semver'}
-                # Convert to canonical nested form so the validator recurses into sub-fields.
-                dict_rules.append({
-                    'fields': {
-                        k: (expand_rule(v)[0] if isinstance(v, str) else v)
-                        for k, v in rule.items()
-                    }
-                })
-            else:
-                dict_rules.append(rule)
-            ordered_data[key] = data.get(key, EMPTY)
-
-        expanded_rule = dict_rules
-        data = ordered_data
 
     result = validator.validate_object(data, expanded_rule, defaults)
 

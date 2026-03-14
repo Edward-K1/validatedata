@@ -295,28 +295,17 @@ def _is_valid_phone(value, fmt=None):
         )
 
 
+MAX_NESTING_DEPTH = 100
+
+
 def _has_nested_rules(rules):
-    """Detect whether any rules contain nested field definitions."""
+    """Detect whether any rules contain nested field definitions (canonical form only)."""
     if isinstance(rules, list):
-        return any(
-            isinstance(r, dict) and ('fields' in r or 'items' in r) for r in rules
-        )
+        return any(_has_nested_rules(r) for r in rules if isinstance(r, dict))
     if isinstance(rules, dict):
-        if 'keys' in rules:
-            def _is_nested_value(v):
-                if not isinstance(v, dict):
-                    return False
-                if 'fields' in v or 'items' in v:
-                    return True
-                # Shorthand: plain dict without 'type' whose values are field rules
-                return 'type' not in v and any(isinstance(fv, (str, dict)) for fv in v.values())
-            return any(_is_nested_value(v) for v in rules['keys'].values())
         if 'fields' in rules or 'items' in rules:
             return True
-        # Shorthand nested: a plain dict whose values are field rules (not a single rule dict)
-        if 'type' not in rules:
-            return any(isinstance(v, (str, dict)) for v in rules.values())
-        return False
+        return any(_has_nested_rules(v) for v in rules.values() if isinstance(v, dict))
     return False
 
 
@@ -384,7 +373,7 @@ class Validator:
         if self.raise_exceptions:
             raise ValidationError(message)
 
-    def validate_object(self, data, rules, defaults, parent_path=''):
+    def validate_object(self, data, rules, defaults, parent_path='', depth=0):
         result = {'ok': False}
 
         def add_strict_rule(_rules):
@@ -425,11 +414,16 @@ class Validator:
             fields = current_rules.get('fields')
             if not fields or not isinstance(value, dict):
                 return value, True
+            if depth >= MAX_NESTING_DEPTH:
+                raise ValueError(
+                    f"Maximum nesting depth of {MAX_NESTING_DEPTH} exceeded"
+                    + (f" at '{path}'" if path else "")
+                )
             nested_rules = list(fields.values())
             nested_data = OrderedDict((k, value.get(k)) for k in fields.keys())
             start = len(self.transformed_data)
             nested_result = self.validate_object(
-                nested_data, nested_rules, {}, parent_path=path
+                nested_data, nested_rules, {}, parent_path=path, depth=depth + 1
             )
             if self.mutate:
                 sub_values = self.transformed_data[start:]

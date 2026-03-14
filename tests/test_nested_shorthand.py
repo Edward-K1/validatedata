@@ -9,6 +9,7 @@ Covers: bare field map, keys wrapper, valid/invalid data, error paths,
 and mutate=True data reconstruction.
 """
 
+import unittest
 
 from validatedata import validate_data
 from .base import BaseTest
@@ -215,3 +216,124 @@ class TestNestedShorthandMutate(BaseTest):
             mutate=False,
         )
         self.assertFalse(hasattr(result, 'data'))
+
+
+# ---------------------------------------------------------------------------
+# Recursion — multi-level shorthand
+# ---------------------------------------------------------------------------
+
+class TestNestedShorthandRecursion(BaseTest):
+
+    def test_two_levels_valid(self):
+        result = validate_data(
+            data={'company': {'address': {'postcode': 'AB1 2CD'}}},
+            rule={'company': {'address': {'postcode': 'str|min:6'}}},
+        )
+        self.assertTrue(result.ok)
+
+    def test_two_levels_invalid_inner_field(self):
+        result = validate_data(
+            data={'company': {'address': {'postcode': '123'}}},
+            rule={'company': {'address': {'postcode': 'str|min:6'}}},
+        )
+        self.assertFalse(result.ok)
+
+    def test_two_levels_error_path(self):
+        result = validate_data(
+            data={'company': {'address': {'postcode': '123'}}},
+            rule={'company': {'address': {'postcode': 'str|min:6'}}},
+        )
+        self.assertTrue(any('company.address.postcode' in e for e in result.errors))
+
+    def test_three_levels_valid(self):
+        result = validate_data(
+            data={'a': {'b': {'c': {'value': 42}}}},
+            rule={'a': {'b': {'c': {'value': 'int'}}}},
+        )
+        self.assertTrue(result.ok)
+
+    def test_three_levels_invalid(self):
+        result = validate_data(
+            data={'a': {'b': {'c': {'value': 'not-an-int'}}}},
+            rule={'a': {'b': {'c': {'value': 'int'}}}},
+        )
+        self.assertFalse(result.ok)
+
+    def test_three_levels_error_path(self):
+        result = validate_data(
+            data={'a': {'b': {'c': {'value': 'not-an-int'}}}},
+            rule={'a': {'b': {'c': {'value': 'int'}}}},
+        )
+        self.assertTrue(any('a.b.c.value' in e for e in result.errors))
+
+    def test_mutate_two_levels(self):
+        result = validate_data(
+            data={'company': {'address': {'postcode': 'AB1 2CD'}}},
+            rule={'company': {'address': {'postcode': 'str|min:6'}}},
+            mutate=True,
+        )
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data, [{'address': {'postcode': 'AB1 2CD'}}])
+
+    def test_mutate_three_levels(self):
+        result = validate_data(
+            data={'a': {'b': {'c': {'value': 42}}}},
+            rule={'a': {'b': {'c': {'value': 'int'}}}},
+            mutate=True,
+        )
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data, [{'b': {'c': {'value': 42}}}])
+
+    def test_mutate_with_transform_propagates_through_levels(self):
+        result = validate_data(
+            data={'user': {'profile': {'name': '  alice  '}}},
+            rule={'user': {'profile': {'name': 'str|strip|min:3'}}},
+            mutate=True,
+        )
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data[0]['profile']['name'], 'alice')
+
+    def test_ten_levels_allowed(self):
+        """Nesting up to MAX_NESTING_DEPTH levels must not raise."""
+        def make_deep(n):
+            rule = 'str'
+            data = 'hello'
+            for _ in range(n):
+                rule = {'x': rule}
+                data = {'x': data}
+            return data, rule
+
+        data, rule = make_deep(100)
+        try:
+            result = validate_data(data=data, rule=rule)
+        except ValueError:
+            self.fail('validate_data raised ValueError within the allowed depth of 10')
+
+    def test_one_hundred_one_levels_raises(self):
+        """Nesting beyond MAX_NESTING_DEPTH must raise ValueError with path info."""
+        def make_deep(n):
+            rule = 'str'
+            data = 'hello'
+            for _ in range(n):
+                rule = {'x': rule}
+                data = {'x': data}
+            return data, rule
+
+        data, rule = make_deep(101)
+        with self.assertRaises(ValueError) as ctx:
+            validate_data(data=data, rule=rule)
+        self.assertIn('100', str(ctx.exception))
+
+    def test_mixed_flat_and_deep_shorthand(self):
+        """Top-level can mix flat string rules with multi-level nested shorthand."""
+        result = validate_data(
+            data={
+                'owner': 'alice',
+                'company': {'address': {'postcode': 'AB1 2CD'}},
+            },
+            rule={
+                'owner': 'str|min:3',
+                'company': {'address': {'postcode': 'str|min:6'}},
+            },
+        )
+        self.assertTrue(result.ok)
