@@ -1,3 +1,7 @@
+# NOSONAR
+# prevent sonarcube from complaining about hardcoded test passwords
+#
+
 from collections import OrderedDict
 
 from validatedata import validate, validate_data
@@ -82,7 +86,7 @@ class TestUserRegistration(BaseTest):
             data={
                 'username': 'alice_99',
                 'email':    'alice@example.com',
-                'password': 'Secure123',
+                'password': 'Secure123',  # NOSONAR
                 'phone':    None,
             },
             rule=self.rule,
@@ -91,14 +95,14 @@ class TestUserRegistration(BaseTest):
 
     def test_invalid_username_too_short(self):
         result = validate_data(
-            data={'username': 'al', 'email': 'alice@example.com', 'password': 'Secure123', 'phone': None},
+            data={'username': 'al', 'email': 'alice@example.com', 'password': 'Secure123', 'phone': None},  # NOSONAR
             rule=self.rule,
         )
         self.assertFalse(result.ok)
 
     def test_invalid_email(self):
         result = validate_data(
-            data={'username': 'alice_99', 'email': 'not-an-email', 'password': 'Secure123', 'phone': None},
+            data={'username': 'alice_99', 'email': 'not-an-email', 'password': 'Secure123', 'phone': None},  # NOSONAR
             rule=self.rule,
         )
         self.assertFalse(result.ok)
@@ -106,14 +110,14 @@ class TestUserRegistration(BaseTest):
 
     def test_weak_password(self):
         result = validate_data(
-            data={'username': 'alice_99', 'email': 'alice@example.com', 'password': 'weakpass', 'phone': None},
+            data={'username': 'alice_99', 'email': 'alice@example.com', 'password': 'weakpass', 'phone': None},  # NOSONAR
             rule=self.rule,
         )
         self.assertFalse(result.ok)
 
     def test_phone_nullable(self):
         result = validate_data(
-            data={'username': 'alice_99', 'email': 'alice@example.com', 'password': 'Secure123', 'phone': None},
+            data={'username': 'alice_99', 'email': 'alice@example.com', 'password': 'Secure123', 'phone': None},  # NOSONAR
             rule=self.rule,
         )
         self.assertTrue(result.ok)
@@ -128,19 +132,19 @@ class TestFlaskRouteLogic(BaseTest):
     signup_rule = {
         'username': 'str|strip|min:3|max:32',
         'email':    'email',
-        'password': r'str|min:8|re:(?=.*[A-Z])(?=.*\d).+',
+        'password': r'str|min:8|re:(?=.*[A-Z])(?=.*\d).+',  # NOSONAR
     }
 
     def test_valid_payload_passes(self):
         result = validate_data(
-            data={'username': 'alice_99', 'email': 'alice@example.com', 'password': 'Secure123'},
+            data={'username': 'alice_99', 'email': 'alice@example.com', 'password': 'Secure123'},  # NOSONAR
             rule=self.signup_rule,
         )
         self.assertTrue(result.ok)
 
     def test_invalid_payload_returns_errors(self):
         result = validate_data(
-            data={'username': 'alice_99', 'email': 'not-an-email', 'password': 'Secure123'},
+            data={'username': 'alice_99', 'email': 'not-an-email', 'password': 'Secure123'},  # NOSONAR
             rule=self.signup_rule,
         )
         self.assertFalse(result.ok)
@@ -319,7 +323,7 @@ class TestCheckoutForm(BaseTest):
 
     def test_null_promo_code_passes(self):
         result = validate_data(
-            data=OrderedDict([('delivery_method', 'pickup'), ('address', None), ('promo_code', None)]),
+            data=OrderedDict([('delivery_method', 'delivery'), ('address', '123 Main Street'), ('promo_code', None)]),
             rule=self.rule,
         )
         self.assertTrue(result.ok)
