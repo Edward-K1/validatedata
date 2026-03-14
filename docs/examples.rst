@@ -271,6 +271,7 @@ step needed.
    )
    def update_profile(username, bio, website):
        # username is already stripped and lowercased
+       # username is already stripped and lowercased
        # bio is stripped, website is validated
        db.update(username=username, bio=bio, website=website)
        return 'profile updated'
@@ -280,7 +281,7 @@ step needed.
        bio='  Building things.  ',
        website='https://alice.dev',
    )
-   # saves username='alice_99', bio='Building things.'
+   # saves username='alice_99', bio='Building things.'  — whitespace stripped
 
 Input arrives messy, your function receives it clean. No intermediate
 variables, no separate call to ``.strip()`` or ``.lower()``.
