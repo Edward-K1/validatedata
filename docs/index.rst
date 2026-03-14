@@ -39,6 +39,7 @@ anywhere defining a full model class feels like overkill.
    rules
    mirror-rules
    decorators
+   examples
 
 .. toctree::
    :maxdepth: 1

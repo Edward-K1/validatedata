@@ -398,6 +398,8 @@ class Validator:
             )
 
         def apply_transform(value, rules, full_data=None):
+            if value is None and rules.get('nullable'):
+                return value
             transform = rules.get('transform')
             if transform is None:
                 return value
@@ -510,6 +512,9 @@ class Validator:
                     )
                     continue
 
+                if transformed_value is None and current_rules.get('nullable'):
+                    self.transformed_data.append(value)
+                    continue
                 self.validate_rule(key, transformed_value, current_rules, path=path)
                 self.transformed_data.append(
                     transformed_value if self.mutate else value
@@ -552,6 +557,9 @@ class Validator:
                     )
                     continue
 
+                if transformed_value is None and current_rules.get('nullable'):
+                    self.transformed_data.append(value)
+                    continue
                 self.validate_rule('', transformed_value, current_rules, path=path)
                 self.transformed_data.append(
                     transformed_value if self.mutate else value

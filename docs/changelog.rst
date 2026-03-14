@@ -61,6 +61,14 @@ Added
 
 ----
 
+Fixed
+~~~~~
+
+- **``nullable`` now short-circuits fully** — previously, ``nullable: True``
+  only bypassed the type check. Transforms and constraint rules (``length``,
+  ``range``, etc.) would still run on ``None`` values, causing errors.
+  ``None`` on a nullable field now skips the entire validation pipeline.
+
 0.3.x
 -----
 
