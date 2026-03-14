@@ -27,11 +27,11 @@ pip install phonenumbers
 from validatedata import validate_data
 
 # with shorthand
-rule={'keys': {
+rule={
     'username': 'str|min:3|max:32',
     'email': 'email',
     'age': 'int|min:18',
-}}
+}
 
 
 result = validate_data(
@@ -45,14 +45,14 @@ else:
     print(result.errors)
 ```
 
-> You can also omit the `keys` wrapper and pass a bare field map directly:
+> With the  `keys` wrapper
 >
 > ```python
-> rule = {
+> rule = {'keys': {
 >     'username': 'str|min:3|max:32',
 >     'email': 'email',
 >     'age': 'int|min:18',
-> }
+> }}
 > ```
 >
 > The `keys` form is recommended when you need to pair field rules with top-level options (such as `strict_keys` in a future release).
@@ -772,6 +772,38 @@ result = validate_data(
 result.errors  # ['company.address.postcode: value is not of required length']
 ```
 
+**Mirror-structure shorthand (0.4.0+):**
+
+Instead of wrapping every nested dict in `{'type': 'dict', 'fields': {...}}`, you can write a rule that mirrors the shape of your data:
+```python
+data = {
+    'app': {
+        'name':    'QuickScript',
+        'version': '1.0.0',
+    }
+}
+
+# before — explicit form
+rule = {'keys': {
+    'app': {
+        'type': 'dict',
+        'fields': {
+            'name':    {'type': 'str', 'range': (3, 'any')},
+            'version': {'type': 'semver'},
+        }
+    }
+}}
+
+# after — rule mirrors the data
+rule = {
+    'app': {
+        'name':    'str|min:3',
+        'version': 'semver',
+    }
+}
+```
+
+Error paths are identical in both forms. Nesting can go up to **100 levels** deep — exceeding this raises a `ValueError`. See the [mirror-rules guide](https://validatedata.readthedocs.io/en/latest/mirror-rules.html) for the full reference.
 **List of typed items:**
 
 ```python
