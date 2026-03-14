@@ -348,7 +348,7 @@ class TestNormalisingBeforeSaving(BaseTest):
             mutate=True,
         )
         self.assertTrue(result.ok)
-        self.assertEqual(result.data[0], 'alice_99')
+        self.assertEqual(result.data['username'], 'alice_99')
 
     def test_bio_accepts_none(self):
         result = validate_data(
@@ -365,7 +365,7 @@ class TestNormalisingBeforeSaving(BaseTest):
             mutate=True,
         )
         self.assertTrue(result.ok)
-        self.assertEqual(result.data[1], 'Building things.')
+        self.assertEqual(result.data['bio'], 'Building things.')
 
     def test_valid_website_passes(self):
         result = validate_data(

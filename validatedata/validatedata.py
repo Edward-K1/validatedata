@@ -189,10 +189,11 @@ def validate(
                 if result.ok:
                     if mutate and hasattr(result, 'data') and result.data:
                         transformed = result.data
+                        _tvals = list(transformed.values()) if isinstance(transformed, dict) else transformed
                         if obj_is_cls:
-                            return await func(obj, *transformed, **kwargs)
+                            return await func(obj, *_tvals, **kwargs)
                         else:
-                            return await func(*transformed, **kwargs)
+                            return await func(*_tvals, **kwargs)
                     else:
                         if isinstance(obj, EmptyObject):
                             return await func(*args, **kwargs)
@@ -212,10 +213,11 @@ def validate(
                 if result.ok:
                     if mutate and hasattr(result, 'data') and result.data:
                         transformed = result.data
+                        _tvals = list(transformed.values()) if isinstance(transformed, dict) else transformed
                         if obj_is_cls:
-                            return func(obj, *transformed, **kwargs)
+                            return func(obj, *_tvals, **kwargs)
                         else:
-                            return func(*transformed, **kwargs)
+                            return func(*_tvals, **kwargs)
                     else:
                         if isinstance(obj, EmptyObject):
                             return func(*args, **kwargs)
@@ -392,6 +394,7 @@ def validate_data(
 
     # Expand shorthand nested dicts before nested-detection so _has_nested_rules
     # only needs to understand {'fields': {...}} form.
+    _was_dict_rule = False
     if isinstance(expanded_rule, (dict, OrderedDict)):
         dict_rules = []
         ordered_data = OrderedDict()
@@ -401,6 +404,7 @@ def validate_data(
             ordered_data[key] = data.get(key, EMPTY)
         expanded_rule = dict_rules
         data = ordered_data
+        _was_dict_rule = True
 
     is_nested = _has_nested_rules(expanded_rule)
     validator = Validator(
@@ -414,6 +418,9 @@ def validate_data(
     )
 
     result = validator.validate_object(data, expanded_rule, defaults)
+
+    if mutate and _was_dict_rule and hasattr(result, 'data'):
+        result.data = dict(zip(data.keys(), result.data))
 
     return result
 

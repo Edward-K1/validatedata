@@ -145,16 +145,22 @@ no structural boilerplate required.
        },
    }
 
-   result = validate_data(data=config, rule=rule)
+   result = validate_data(data=config, rule=rule, mutate=True)
 
    if not result.ok:
        for error in result.errors:
            print(f'Config error: {error}')
        raise SystemExit('Invalid configuration — aborting startup')
 
+   # result.data is a dict with the same shape as config —
+   # use it directly so any transforms (e.g. strip on string fields) are applied
+   app_config = result.data
+
 Bad config fails loudly at startup with a clear field path
 (e.g. ``database.port: invalid integer``) rather than surfacing as a
-cryptic runtime error later.
+cryptic runtime error later. Passing ``mutate=True`` means ``result.data``
+gives you back the validated — and optionally transformed — config in exactly
+the same nested structure, ready to use without re-reading the original dict.
 
 ----
 
@@ -286,3 +292,36 @@ step needed.
 
 Input arrives messy, your function receives it clean. No intermediate
 variables, no separate call to ``.strip()`` or ``.lower()``.
+
+The same thing works with :func:`validate_data` directly. When the input is a
+dict, ``result.data`` is returned as a dict with the same keys — so you can
+use the cleaned values straight away without tracking positional order:
+
+.. code-block:: python
+
+   from validatedata import validate_data
+
+   result = validate_data(
+       data={
+           'username': '  Alice_99  ',
+           'bio':      '  Building things.  ',
+           'website':  'https://alice.dev',
+       },
+       rule={
+           'username': 'str|strip|lower|min:3|max:32',
+           'bio':      'str|strip|max:280|nullable',
+           'website':  'url|nullable',
+       },
+       mutate=True,
+   )
+
+   if result.ok:
+       db.update(**result.data)
+       # result.data == {
+       #     'username': 'alice_99',
+       #     'bio':      'Building things.',
+       #     'website':  'https://alice.dev',
+       # }
+
+``result.data`` mirrors the shape of the input dict exactly — nested dicts are
+preserved, so a config-shaped input comes back as a config-shaped output.

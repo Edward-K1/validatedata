@@ -92,7 +92,10 @@ Reading the result
    * - ``result.errors``
      - List of error messages, grouped by field by default
    * - ``result.data``
-     - Transformed values — only present when ``mutate=True`` is passed
+     - Transformed values — only present when ``mutate=True`` is passed.
+       The shape mirrors the input: a ``dict`` input returns a ``dict`` keyed
+       by field name; a ``list`` or ``tuple`` input returns a ``list`` indexed
+       by position
 
 .. code-block:: python
 
