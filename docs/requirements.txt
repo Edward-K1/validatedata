@@ -1,0 +1,4 @@
+furo
+sphinx>=7.0
+sphinx-copybutton
+python-dateutil

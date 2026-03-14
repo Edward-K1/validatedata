@@ -19,6 +19,7 @@ pip install phonenumbers
 ```
 
 ---
+📖 **[Read the full documentation](https://validatedata.readthedocs.io)**
 
 ## Quick Start
 
