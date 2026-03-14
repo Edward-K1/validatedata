@@ -45,7 +45,7 @@ else:
     print(result.errors)
 ```
 
-> **Python 3.7+:** For simple cases you can omit the `keys` wrapper and pass a bare field map directly:
+> You can also omit the `keys` wrapper and pass a bare field map directly:
 >
 > ```python
 > rule = {

@@ -61,6 +61,7 @@ VALID_RULE_KEYS: frozenset[str] = frozenset({
     'type',
     'object',
     # structure
+    'keys',
     'fields',
     'items',
     # scalar validators
@@ -99,7 +100,7 @@ def _check_rule_dict(rule: dict[str, Any], path: str = '') -> None:
     if not unknown:
         return
 
-    all_valid = list(VALID_RULE_KEYS) + ['<key>-message']
+    # all_valid = list(VALID_RULE_KEYS) + ['<key>-message']
     messages = []
     for key in unknown:
         location = f" in rule at '{path}'" if path else ' in rule'
@@ -108,6 +109,10 @@ def _check_rule_dict(rule: dict[str, Any], path: str = '') -> None:
         messages.append(f"Unknown rule key '{key}'{location}.{hint}")
 
     raise ValueError('\n'.join(messages))
+
+def check_rule(rule: dict[str, Any]) -> None:
+    """Validate a rule dict in isolation. Raises ValueError for unknown keys."""
+    _check_rule_dict(rule)
 
 
 class EmptyObject:
