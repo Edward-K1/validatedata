@@ -78,19 +78,22 @@ returns the error dict directly — you just need to check for it.
        user = create_user(body['username'], body['email'], body['password'])
        return jsonify({'id': user.id}), 201
 
-Or use the ``@validate`` decorator to keep the route body free of validation
-logic entirely:
+Or register a Flask error handler and use ``raise_exceptions=True`` to keep
+the route body completely free of validation logic:
 
 .. code-block:: python
 
+   from validatedata import ValidationError
+
+   @app.errorhandler(ValidationError)
+   def handle_validation_error(e):
+       return jsonify({'errors': str(e)}), 422
+
    @app.route('/signup', methods=['POST'])
-   @validate(signup_rule, raise_exceptions=False)
+   @validate(signup_rule, raise_exceptions=True)
    def signup(username, email, password):
        user = create_user(username, email, password)
        return jsonify({'id': user.id}), 201
-
-   # If validation fails, @validate returns {'errors': [...]} before the body runs.
-   # Wire that into a Flask error handler to keep things DRY.
 
 ----
 
@@ -145,9 +148,8 @@ no structural boilerplate required.
    result = validate_data(data=config, rule=rule)
 
    if not result.ok:
-       for group in result.errors:
-           if group:
-               print(f'Config error: {group[0]}')
+       for error in result.errors:
+           print(f'Config error: {error}')
        raise SystemExit('Invalid configuration — aborting startup')
 
 Bad config fails loudly at startup with a clear field path
@@ -246,7 +248,7 @@ validation on a field entirely when the condition isn't met.
        rule=rule,
    )
    result.ok     # False
-   result.errors # [[], ['a delivery address is required'], []]
+   result.errors # [[], ['a delivery address is required', 'a delivery address is required'], []]
 
 ----
 
@@ -270,7 +272,6 @@ step needed.
        mutate=True,
    )
    def update_profile(username, bio, website):
-       # username is already stripped and lowercased
        # username is already stripped and lowercased
        # bio is stripped, website is validated
        db.update(username=username, bio=bio, website=website)
