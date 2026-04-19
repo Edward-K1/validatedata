@@ -343,11 +343,15 @@ def check_type(value: Any, spec: TypeSpec) -> bool:
 def validate_range(value: Any, bounds: tuple) -> bool:
     min_val, max_val = bounds
 
-    # Date range — bounds are pre-parsed to datetime in _build_range_arg.
-    # The value may be a datetime object or a parseable string.
+    # Both bounds 'any' — always valid regardless of type.
+    if min_val == 'any' and max_val == 'any':
+        return True
+
+    # Date range — bounds are pre-parsed to datetime in _build_range_arg, or
+    # the value itself may be a datetime object with one 'any' bound.
     lo_is_dt = isinstance(min_val, datetime)
     hi_is_dt = isinstance(max_val, datetime)
-    if lo_is_dt or hi_is_dt:
+    if lo_is_dt or hi_is_dt or isinstance(value, datetime):
         try:
             cast = value if isinstance(value, datetime) else parse_date(value)
         except Exception:
@@ -417,8 +421,8 @@ def validate_expression(value: Any, pattern: str) -> bool:
     if pattern not in _EXPRESSION_CACHE:
         try:
             _EXPRESSION_CACHE[pattern] = re.compile(pattern, re.VERBOSE)
-        except Exception:
-            return False
+        except Exception as ex:
+            raise ValidationError(f'error compiling regex: {ex}')
     return _EXPRESSION_CACHE[pattern].match(str(value)) is not None
 
 
