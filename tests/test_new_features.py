@@ -1,6 +1,6 @@
 from collections import OrderedDict
 from validatedata.validatedata import validate, validate_data, validate_types
-from validatedata.validator import ValidationError
+from validatedata import ValidationError
 from validatedata.messages import error_messages
 from .base import BaseTest
 

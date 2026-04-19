@@ -16,16 +16,141 @@ from types import SimpleNamespace
 from typing import Any, NamedTuple
 
 from .messages import error_messages as errm
-from .validator import (
-    ValidationError,
-    MAX_NESTING_DEPTH,
-    _is_prime,
-    _is_valid_color,
-    _URL_RE,
-    _SLUG_RE,
-    _SEMVER_RE,
-    _PHONE_E164_RE,
+
+
+# ---------------------------------------------------------------------------
+# Public exception
+# ---------------------------------------------------------------------------
+
+class ValidationError(Exception):
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Nesting limit
+# ---------------------------------------------------------------------------
+
+MAX_NESTING_DEPTH = 100
+
+
+# ---------------------------------------------------------------------------
+# Regex constants (type checking)
+# ---------------------------------------------------------------------------
+
+_URL_RE = re.compile(
+    r'^(https?|ftp)://'
+    r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|'
+    r'localhost|'
+    r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+    r'(?::\d+)?'
+    r'(?:/?|[/?]\S+)$',
+    re.IGNORECASE,
 )
+
+_SLUG_RE = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
+
+_SEMVER_RE = re.compile(
+    r'^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)'
+    r'(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?'
+    r'(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$'
+)
+
+_PHONE_E164_RE = re.compile(r'^\+[1-9]\d{6,14}$')
+
+_HEX_COLOR_RE = re.compile(r'^#([A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$')
+
+_RGB_COLOR_RE = re.compile(
+    r'^rgb\(\s*(25[0-5]|2[0-4]\d|[01]?\d\d?)\s*,'
+    r'\s*(25[0-5]|2[0-4]\d|[01]?\d\d?)\s*,'
+    r'\s*(25[0-5]|2[0-4]\d|[01]?\d\d?)\s*\)$'
+)
+
+_HSL_COLOR_RE = re.compile(
+    r'^hsl\(\s*(360|3[0-5]\d|[12]\d\d|[1-9]\d|\d)\s*,'
+    r'\s*(100|[1-9]\d|\d)%\s*,'
+    r'\s*(100|[1-9]\d|\d)%\s*\)$'
+)
+
+_NAMED_COLORS = {
+    'aliceblue', 'antiquewhite', 'aqua', 'aquamarine', 'azure', 'beige',
+    'bisque', 'black', 'blanchedalmond', 'blue', 'blueviolet', 'brown',
+    'burlywood', 'cadetblue', 'chartreuse', 'chocolate', 'coral',
+    'cornflowerblue', 'cornsilk', 'crimson', 'cyan', 'darkblue', 'darkcyan',
+    'darkgoldenrod', 'darkgray', 'darkgreen', 'darkgrey', 'darkkhaki',
+    'darkmagenta', 'darkolivegreen', 'darkorange', 'darkorchid', 'darkred',
+    'darksalmon', 'darkseagreen', 'darkslateblue', 'darkslategray',
+    'darkslategrey', 'darkturquoise', 'darkviolet', 'deeppink', 'deepskyblue',
+    'dimgray', 'dimgrey', 'dodgerblue', 'firebrick', 'floralwhite',
+    'forestgreen', 'fuchsia', 'gainsboro', 'ghostwhite', 'gold', 'goldenrod',
+    'gray', 'green', 'greenyellow', 'grey', 'honeydew', 'hotpink',
+    'indianred', 'indigo', 'ivory', 'khaki', 'lavender', 'lavenderblush',
+    'lawngreen', 'lemonchiffon', 'lightblue', 'lightcoral', 'lightcyan',
+    'lightgoldenrodyellow', 'lightgray', 'lightgreen', 'lightgrey',
+    'lightpink', 'lightsalmon', 'lightseagreen', 'lightskyblue',
+    'lightslategray', 'lightslategrey', 'lightsteelblue', 'lightyellow',
+    'lime', 'limegreen', 'linen', 'magenta', 'maroon', 'mediumaquamarine',
+    'mediumblue', 'mediumorchid', 'mediumpurple', 'mediumseagreen',
+    'mediumslateblue', 'mediumspringgreen', 'mediumturquoise',
+    'mediumvioletred', 'midnightblue', 'mintcream', 'mistyrose', 'moccasin',
+    'navajowhite', 'navy', 'oldlace', 'olive', 'olivedrab', 'orange',
+    'orangered', 'orchid', 'palegoldenrod', 'palegreen', 'paleturquoise',
+    'palevioletred', 'papayawhip', 'peachpuff', 'peru', 'pink', 'plum',
+    'powderblue', 'purple', 'red', 'rosybrown', 'royalblue', 'saddlebrown',
+    'salmon', 'sandybrown', 'seagreen', 'seashell', 'sienna', 'silver',
+    'skyblue', 'slateblue', 'slategray', 'slategrey', 'snow', 'springgreen',
+    'steelblue', 'tan', 'teal', 'thistle', 'tomato', 'turquoise', 'violet',
+    'wheat', 'white', 'whitesmoke', 'yellow', 'yellowgreen',
+}
+
+
+# ---------------------------------------------------------------------------
+# Helper functions for specialised type checks
+# ---------------------------------------------------------------------------
+
+def _is_prime(n: Any) -> bool:
+    try:
+        n = int(n)
+    except (ValueError, TypeError):
+        return False
+    if n < 2:
+        return False
+    if n == 2:
+        return True
+    if n % 2 == 0:
+        return False
+    for i in range(3, int(n ** 0.5) + 1, 2):
+        if n % i == 0:
+            return False
+    return True
+
+
+def _is_valid_color(value: Any, fmt: str | None = None) -> bool:
+    s = str(value).strip()
+    if fmt == 'hex':
+        return bool(_HEX_COLOR_RE.match(s))
+    if fmt == 'rgb':
+        return bool(_RGB_COLOR_RE.match(s))
+    if fmt == 'hsl':
+        return bool(_HSL_COLOR_RE.match(s))
+    if fmt == 'named':
+        return s.lower() in _NAMED_COLORS
+    return (
+        bool(_HEX_COLOR_RE.match(s))
+        or bool(_RGB_COLOR_RE.match(s))
+        or bool(_HSL_COLOR_RE.match(s))
+        or s.lower() in _NAMED_COLORS
+    )
+
+
+def _has_nested_rules(rules: Any) -> bool:
+    """Detect whether any rules contain nested field definitions (canonical form only)."""
+    if isinstance(rules, list):
+        return any(_has_nested_rules(r) for r in rules if isinstance(r, dict))
+    if isinstance(rules, dict):
+        if 'fields' in rules or 'items' in rules:
+            return True
+        return any(_has_nested_rules(v) for v in rules.values() if isinstance(v, dict))
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -520,7 +645,7 @@ def _error_key_for_fn(fn: Any, rule_dict: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Message resolution — mirrors Validator._get_error_message + append_error
+# Message resolution
 #
 # Priority:
 #   1. rule_dict.get('<rule_key>-message')   e.g. 'range-message'
@@ -544,9 +669,8 @@ def _resolve_message(rule_dict: dict, fn: Any, field_name: str, error_key: str) 
         return generic
 
     # 3 & 4. Default from messages.py — field-prefixed when field_name is truthy
-    # The truthy check mirrors the `if field` guard in Validator._get_error_message
-    # exactly: an empty string field_name (positional/list data) must NOT trigger
-    # the prefixed lookup.
+    # The truthy check on field_name: an empty string (positional/list data)
+    # must NOT trigger the prefixed lookup.
     if field_name:
         raw = errm.get(f'field_{error_key}', '')
         if raw:
@@ -664,7 +788,7 @@ def _check_depends_on(rule_dict: dict, value: Any, full_data: dict) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Path building — mirrors Validator._build_path exactly
+# Path building
 # ---------------------------------------------------------------------------
 
 def _build_path(parent_path: str, key: Any, index: int | None = None) -> str:
@@ -774,7 +898,7 @@ def _handle_items(
 
 
 # ---------------------------------------------------------------------------
-# Core validation loop — mirrors Validator.validate_object
+# Core validation loop
 # ---------------------------------------------------------------------------
 
 def _run_validate_object(
@@ -880,14 +1004,9 @@ def validate_object_engine(
     nested: bool = False,
     **kwds: Any,
 ) -> SimpleNamespace:
-    """Run validation through the compiled engine.
-
-    Accepts the same arguments as Validator.validate_object (plus the flags
-    previously passed to Validator.__init__) and returns the same
-    SimpleNamespace result type.
-    """
+    """Run validation through the engine and return a SimpleNamespace result."""
     # kwds may arrive nested as kwds['kwds'] (from @validate / validate_data)
-    # or as direct keyword args — handle both to match Validator.__init__ behaviour.
+    # or as direct keyword args — handle both.
     if 'kwds' in kwds:
         keywords = kwds['kwds']
         group_errors = keywords.get('group_errors', True)

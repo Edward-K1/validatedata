@@ -13,7 +13,7 @@ from validatedata.validatedata import (
     _pipe_tokenize,
     validate_data,
 )
-from validatedata.validator import ValidationError
+from validatedata import ValidationError
 from .base import BaseTest
 
 

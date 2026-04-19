@@ -7,8 +7,7 @@ from functools import wraps
 from inspect import getfullargspec, iscoroutinefunction
 from typing import Any
 
-from .validator import Validator, ValidationError, _has_nested_rules, MAX_NESTING_DEPTH
-from .engine import validate_object_engine
+from .engine import validate_object_engine, ValidationError, _has_nested_rules, MAX_NESTING_DEPTH
 
 
 class ValidationResult:

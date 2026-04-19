@@ -11,7 +11,7 @@ import unittest
 from inspect import iscoroutinefunction
 
 from validatedata.validatedata import validate, validate_types
-from validatedata.validator import ValidationError
+from validatedata import ValidationError
 from .base import BaseTest
 
 
