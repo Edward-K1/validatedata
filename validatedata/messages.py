@@ -21,7 +21,7 @@ error_messages: dict[str, str] = {
     'invalid_email': 'invalid email',
     'not_even': 'value is not an even number',
     'not_odd': 'value is not an odd number',
-    'unknown_exception': 'Unknown exception in {location}: {error}',
+    'unknown_exception': 'Unknown exception in %s: %s',
     'not_permitted_type': 'value is not one of the permitted types',
     'missing_value': 'value is missing',
     'invalid_object': 'object does not match expected type',

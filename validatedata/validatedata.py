@@ -127,28 +127,41 @@ class EmptyObject:
 EMPTY = EmptyObject()
 
 
-def _build_func_data(
+def _extract_func_spec(
     func: Any,
-    obj: Any,
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
     is_class: bool = False,
-) -> tuple[OrderedDict[str, Any], OrderedDict[str, Any], bool]:
-    """Extract and align positional/keyword arguments into an OrderedDict for validation."""
-    func_data = OrderedDict()
-    func_defaults = OrderedDict()
+) -> tuple:
+    """Extract the static spec from a function — run once at decoration time.
+
+    Returns (clean_params, func_defaults, obj_is_cls).
+    """
     func_defn = getfullargspec(func)
     obj_is_cls = True if (is_class or (func_defn.args and func_defn.args[0] == 'self')) else False
     clean_params = func_defn.args[1:] if obj_is_cls else func_defn.args
 
-    func_data.update(zip(clean_params, [EMPTY] * len(clean_params)))
-
+    func_defaults: OrderedDict = OrderedDict()
     if func_defn.defaults:
-        defaults_dict = OrderedDict(
+        func_defaults.update(
             zip(clean_params[-len(func_defn.defaults):], func_defn.defaults)
         )
-        func_data.update(defaults_dict)
-        func_defaults.update(defaults_dict)
+
+    return clean_params, func_defaults, obj_is_cls
+
+
+def _align_func_data(
+    clean_params: list,
+    func_defaults: OrderedDict,
+    obj_is_cls: bool,
+    obj: Any,
+    args: tuple,
+    kwargs: dict,
+) -> tuple:
+    """Align call-time arguments against the cached spec — run on every call."""
+    func_data: OrderedDict = OrderedDict()
+    func_data.update(zip(clean_params, [EMPTY] * len(clean_params)))
+
+    if func_defaults:
+        func_data.update(func_defaults)
 
     if not obj_is_cls:
         func_data[clean_params[0]] = obj
@@ -170,6 +183,18 @@ def _build_func_data(
     return func_data, func_defaults, obj_is_cls
 
 
+def _build_func_data(
+    func: Any,
+    obj: Any,
+    args: tuple,
+    kwargs: dict,
+    is_class: bool = False,
+) -> tuple:
+    """Legacy single-call wrapper — used by validate_types which caches the spec itself."""
+    clean_params, func_defaults, obj_is_cls = _extract_func_spec(func, is_class)
+    return _align_func_data(clean_params, func_defaults, obj_is_cls, obj, args, kwargs)
+
+
 def validate(
     rule: str | dict[str, Any] | list[str | dict[str, Any]],
     raise_exceptions: bool = False,
@@ -178,11 +203,14 @@ def validate(
     **kwds: Any,
 ) -> Any:
     def decorator(func):
+        # Extract spec once at decoration time — not on every call.
+        _clean_params, _func_defaults, _obj_is_cls = _extract_func_spec(func, is_class)
+
         if iscoroutinefunction(func):
             @wraps(func)
             async def wrapper(obj=EMPTY, *args, **kwargs):
-                func_data, func_defaults, obj_is_cls = _build_func_data(
-                    func, obj, args, kwargs, is_class
+                func_data, func_defaults, obj_is_cls = _align_func_data(
+                    _clean_params, _func_defaults, _obj_is_cls, obj, args, kwargs
                 )
                 result = validate_data(
                     func_data, rule, raise_exceptions, func_defaults, mutate=mutate, **kwds
@@ -205,8 +233,8 @@ def validate(
         else:
             @wraps(func)
             def wrapper(obj=EMPTY, *args, **kwargs):
-                func_data, func_defaults, obj_is_cls = _build_func_data(
-                    func, obj, args, kwargs, is_class
+                func_data, func_defaults, obj_is_cls = _align_func_data(
+                    _clean_params, _func_defaults, _obj_is_cls, obj, args, kwargs
                 )
                 result = validate_data(
                     func_data, rule, raise_exceptions, func_defaults, mutate=mutate, **kwds
