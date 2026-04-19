@@ -8,6 +8,7 @@ from inspect import getfullargspec, iscoroutinefunction
 from typing import Any
 
 from .validator import Validator, ValidationError, _has_nested_rules, MAX_NESTING_DEPTH
+from .engine import validate_object_engine
 
 
 class ValidationResult:
@@ -336,6 +337,18 @@ def _expand_shorthand_rule(
     if isinstance(rule, str):
         return expand_rule(rule)[0]
 
+    # Mirror list syntax: [rule] means "a list where every item matches rule"
+    if isinstance(rule, list):
+        if len(rule) != 1:
+            raise ValueError(
+                f'Mirror list syntax requires exactly one element at {repr(path) if path else "rule root"}. '
+                "For explicit list validation use: {'type': 'list', 'items': ...}"
+            )
+        return {
+            'type': 'list',
+            'items': _expand_shorthand_rule(rule[0], f'{path}[]' if path else '[]', depth + 1),
+        }
+
     if not isinstance(rule, dict):
         return rule
 
@@ -407,17 +420,15 @@ def validate_data(
         _was_dict_rule = True
 
     is_nested = _has_nested_rules(expanded_rule)
-    validator = Validator(
-        NATIVE_TYPES,
-        BASIC_TYPES,
-        EXTENDED_TYPES,
-        raise_exceptions,
+    result = validate_object_engine(
+        data,
+        expanded_rule,
+        defaults,
+        raise_exceptions=raise_exceptions,
         mutate=mutate,
         nested=is_nested,
         **kwds,
     )
-
-    result = validator.validate_object(data, expanded_rule, defaults)
 
     if mutate and _was_dict_rule and hasattr(result, 'data'):
         result.data = dict(zip(data.keys(), result.data))
@@ -438,6 +449,7 @@ _PIPE_VALUE_KEYWORDS = frozenset({
     'min:', 'max:', 'between:', 'in:', 'not_in:',
     'starts_with:', 'ends_with:', 'contains:',
     'format:', 're:', 'msg:',
+    'of:', 'length:', 'region:',
 })
 
 _TRANSFORM_MAP = {
@@ -561,7 +573,29 @@ def _expand_pipe_rule(rule: str) -> dict[str, Any]:
             rule_dict[_CSV_KEYS[key]] = _split_csv(_require_value(key, value))
 
         elif key in _VALUE_KEYS:
-            rule_dict[_VALUE_KEYS[key]] = _require_value(key, value)
+            v = _require_value(key, value)
+            if key == 'contains' and ',' in v:
+                rule_dict[_VALUE_KEYS[key]] = tuple(item.strip() for item in v.split(','))
+            else:
+                rule_dict[_VALUE_KEYS[key]] = v
+
+        elif key == 'of':
+            all_types = set(BASIC_TYPES + EXTENDED_TYPES)
+            values = _split_csv(_require_value(key, value))
+            for t in values:
+                if t not in all_types:
+                    raise ValueError(f'Unknown type {t!r} in of: modifier in rule: {rule!r}')
+            rule_dict['items'] = values  # tuple of type name strings
+
+        elif key == 'length':
+            v = _require_value(key, value)
+            try:
+                rule_dict['length'] = int(v)
+            except (ValueError, TypeError):
+                raise ValueError(f'"length" requires an integer value in rule: {rule!r}')
+
+        elif key == 'region':
+            rule_dict['region'] = _require_value(key, value)
 
         elif key == 'msg':
             rule_dict['message'] = value or ''

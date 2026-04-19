@@ -899,9 +899,15 @@ class Validator:
             custom_message = rules.get('type-message', '') or rules.get('message', '')
 
             if error_key == ErrorKeys.INVALID_TYPE:
-                ev = (true_type, type(data).__qualname__)
-                error_fields = (ev[0], field_name, ev[1]) if field_name else ev
-                formatted = custom_message or raw_error % error_fields
+                actual = type(data).__qualname__
+                if field_name:
+                    formatted = custom_message or raw_error.format(
+                        expected=true_type, field=field_name, actual=actual
+                    )
+                else:
+                    formatted = custom_message or raw_error.format(
+                        expected=true_type, actual=actual
+                    )
             else:
                 formatted = custom_message or raw_error
 
@@ -1031,8 +1037,14 @@ class Validator:
 
         if error_key == ErrorKeys.INVALID_TYPE:
             ev = error_values
-            error_fields = (ev[0], field, ev[1]) if field else (ev[0], ev[1])
-            formatted_message = custom_message or raw_error % error_fields
+            if field:
+                formatted_message = custom_message or raw_error.format(
+                    expected=ev[0], field=field, actual=ev[1]
+                )
+            else:
+                formatted_message = custom_message or raw_error.format(
+                    expected=ev[0], actual=ev[1]
+                )
         else:
             formatted_message = custom_message or raw_error
 
