@@ -1,5 +1,5 @@
 from .validatedata import validate, validate_data, validate_types, ValidationResult, VALID_RULE_KEYS, check_rule
-from .engine import ValidationError
+from .engine import ValidationError, cache
 
 __version__ = '0.4.1'
 
@@ -11,4 +11,5 @@ __all__ = [
     'ValidationError',
     'VALID_RULE_KEYS',
     'check_rule',
+    'cache',
 ]

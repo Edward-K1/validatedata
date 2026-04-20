@@ -1038,3 +1038,52 @@ def validate_object_engine(
         result['data'] = ctx.transformed_data
 
     return SimpleNamespace(**result)
+
+
+# ---------------------------------------------------------------------------
+# Global cache handle
+#
+# Plain dicts are intentional — see design notes. _FN_CACHE is bounded by the
+# rule vocabulary (shape keys carry no values). _ARGS_CACHE is bounded by the
+# number of distinct rule value combinations, which is small for static rules.
+# LRU eviction would hurt more than help: evicting a live shape forces a
+# recompile on the next hit rather than a free lookup.
+#
+# Expose a clear() method as a relief valve for operators who observe unexpected
+# memory growth (e.g. dynamic rule construction with high value cardinality),
+# and size() for monitoring.
+# ---------------------------------------------------------------------------
+
+class _CacheNamespace:
+    """Thin handle for the module-level rule caches.
+
+    Usage::
+
+        from validatedata import cache
+        cache.clear()          # drop all cached entries
+        cache.size()           # -> {'fn': N, 'args': N, 'expression': N}
+    """
+
+    def clear(self) -> None:
+        """Clear all rule caches. Thread-safe for reads; call from a quiescent state."""
+        _FN_CACHE.clear()
+        _ARGS_CACHE.clear()
+        _EXPRESSION_CACHE.clear()
+
+    def size(self) -> dict[str, int]:
+        """Return the number of entries in each cache."""
+        return {
+            'fn':         len(_FN_CACHE),
+            'args':       len(_ARGS_CACHE),
+            'expression': len(_EXPRESSION_CACHE),
+        }
+
+    def __repr__(self) -> str:
+        s = self.size()
+        return (
+            f'<validatedata cache  fn={s["fn"]}  '
+            f'args={s["args"]}  expression={s["expression"]}>'
+        )
+
+
+cache = _CacheNamespace()
