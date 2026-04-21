@@ -1061,7 +1061,7 @@ class _CacheNamespace:
 
         from validatedata import cache
         cache.clear()          # drop all cached entries
-        cache.size()           # -> {'fn': N, 'args': N, 'expression': N}
+        cache.size()           # -> {'fn': N, 'args': N, 'expression': N, 'compiled': N}
     """
 
     def clear(self) -> None:
@@ -1069,20 +1069,28 @@ class _CacheNamespace:
         _FN_CACHE.clear()
         _ARGS_CACHE.clear()
         _EXPRESSION_CACHE.clear()
+        # Lazy import avoids a circular dependency: compiled imports from
+        # engine at module level; engine must not import compiled at module
+        # level. Importing inside the method body is safe because both modules
+        # are fully initialised by the time any caller reaches this point.
+        from .compiled import _COMPILED_CACHE
+        _COMPILED_CACHE.clear()
 
     def size(self) -> dict[str, int]:
         """Return the number of entries in each cache."""
+        from .compiled import _COMPILED_CACHE
         return {
             'fn':         len(_FN_CACHE),
             'args':       len(_ARGS_CACHE),
             'expression': len(_EXPRESSION_CACHE),
+            'compiled':   len(_COMPILED_CACHE),
         }
 
     def __repr__(self) -> str:
         s = self.size()
         return (
-            f'<validatedata cache  fn={s["fn"]}  '
-            f'args={s["args"]}  expression={s["expression"]}>'
+            f'<validatedata cache  fn={s["fn"]}  args={s["args"]}  '
+            f'expression={s["expression"]}  compiled={s["compiled"]}>'
         )
 
 
