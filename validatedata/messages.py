@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 error_messages: dict[str, str] = {
-    'type_invalid': 'Expected value of type %s, found %s',
-    'field_type_invalid': 'Expected value of type %s for field %s, found %s',
+    'type_invalid': 'Expected value of type {expected}, found {actual}',
+    'field_type_invalid': 'Expected value of type {expected} for field {field}, found {actual}',
     'length_invalid': 'value is not of required length',
     'object_length_invalid': 'object does not have required number of elements',
     'not_in_options': 'value not in list of options',
@@ -21,7 +21,8 @@ error_messages: dict[str, str] = {
     'invalid_email': 'invalid email',
     'not_even': 'value is not an even number',
     'not_odd': 'value is not an odd number',
-    'unkown_exception': 'Unknown exception in %s: %s',
+    'unknown_exception': 'Unknown exception in %s: %s',
+    'not_permitted_type': 'value is not one of the permitted types',
     'missing_value': 'value is missing',
     'invalid_object': 'object does not match expected type',
     'no_error_message': 'Please set an error message',

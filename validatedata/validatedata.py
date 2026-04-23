@@ -7,7 +7,7 @@ from functools import wraps
 from inspect import getfullargspec, iscoroutinefunction
 from typing import Any
 
-from .validator import Validator, ValidationError, _has_nested_rules, MAX_NESTING_DEPTH
+from .engine import validate_object_engine, ValidationError, _has_nested_rules, MAX_NESTING_DEPTH
 
 
 class ValidationResult:
@@ -126,28 +126,41 @@ class EmptyObject:
 EMPTY = EmptyObject()
 
 
-def _build_func_data(
+def _extract_func_spec(
     func: Any,
-    obj: Any,
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
     is_class: bool = False,
-) -> tuple[OrderedDict[str, Any], OrderedDict[str, Any], bool]:
-    """Extract and align positional/keyword arguments into an OrderedDict for validation."""
-    func_data = OrderedDict()
-    func_defaults = OrderedDict()
+) -> tuple:
+    """Extract the static spec from a function — run once at decoration time.
+
+    Returns (clean_params, func_defaults, obj_is_cls).
+    """
     func_defn = getfullargspec(func)
     obj_is_cls = True if (is_class or (func_defn.args and func_defn.args[0] == 'self')) else False
     clean_params = func_defn.args[1:] if obj_is_cls else func_defn.args
 
-    func_data.update(zip(clean_params, [EMPTY] * len(clean_params)))
-
+    func_defaults: OrderedDict = OrderedDict()
     if func_defn.defaults:
-        defaults_dict = OrderedDict(
+        func_defaults.update(
             zip(clean_params[-len(func_defn.defaults):], func_defn.defaults)
         )
-        func_data.update(defaults_dict)
-        func_defaults.update(defaults_dict)
+
+    return clean_params, func_defaults, obj_is_cls
+
+
+def _align_func_data(
+    clean_params: list,
+    func_defaults: OrderedDict,
+    obj_is_cls: bool,
+    obj: Any,
+    args: tuple,
+    kwargs: dict,
+) -> tuple:
+    """Align call-time arguments against the cached spec — run on every call."""
+    func_data: OrderedDict = OrderedDict()
+    func_data.update(zip(clean_params, [EMPTY] * len(clean_params)))
+
+    if func_defaults:
+        func_data.update(func_defaults)
 
     if not obj_is_cls:
         func_data[clean_params[0]] = obj
@@ -169,6 +182,18 @@ def _build_func_data(
     return func_data, func_defaults, obj_is_cls
 
 
+def _build_func_data(
+    func: Any,
+    obj: Any,
+    args: tuple,
+    kwargs: dict,
+    is_class: bool = False,
+) -> tuple:
+    """Legacy single-call wrapper — used by validate_types which caches the spec itself."""
+    clean_params, func_defaults, obj_is_cls = _extract_func_spec(func, is_class)
+    return _align_func_data(clean_params, func_defaults, obj_is_cls, obj, args, kwargs)
+
+
 def validate(
     rule: str | dict[str, Any] | list[str | dict[str, Any]],
     raise_exceptions: bool = False,
@@ -177,11 +202,14 @@ def validate(
     **kwds: Any,
 ) -> Any:
     def decorator(func):
+        # Extract spec once at decoration time — not on every call.
+        _clean_params, _func_defaults, _obj_is_cls = _extract_func_spec(func, is_class)
+
         if iscoroutinefunction(func):
             @wraps(func)
             async def wrapper(obj=EMPTY, *args, **kwargs):
-                func_data, func_defaults, obj_is_cls = _build_func_data(
-                    func, obj, args, kwargs, is_class
+                func_data, func_defaults, obj_is_cls = _align_func_data(
+                    _clean_params, _func_defaults, _obj_is_cls, obj, args, kwargs
                 )
                 result = validate_data(
                     func_data, rule, raise_exceptions, func_defaults, mutate=mutate, **kwds
@@ -204,8 +232,8 @@ def validate(
         else:
             @wraps(func)
             def wrapper(obj=EMPTY, *args, **kwargs):
-                func_data, func_defaults, obj_is_cls = _build_func_data(
-                    func, obj, args, kwargs, is_class
+                func_data, func_defaults, obj_is_cls = _align_func_data(
+                    _clean_params, _func_defaults, _obj_is_cls, obj, args, kwargs
                 )
                 result = validate_data(
                     func_data, rule, raise_exceptions, func_defaults, mutate=mutate, **kwds
@@ -336,6 +364,18 @@ def _expand_shorthand_rule(
     if isinstance(rule, str):
         return expand_rule(rule)[0]
 
+    # Mirror list syntax: [rule] means "a list where every item matches rule"
+    if isinstance(rule, list):
+        if len(rule) != 1:
+            raise ValueError(
+                f'Mirror list syntax requires exactly one element at {repr(path) if path else "rule root"}. '
+                "For explicit list validation use: {'type': 'list', 'items': ...}"
+            )
+        return {
+            'type': 'list',
+            'items': _expand_shorthand_rule(rule[0], f'{path}[]' if path else '[]', depth + 1),
+        }
+
     if not isinstance(rule, dict):
         return rule
 
@@ -407,17 +447,15 @@ def validate_data(
         _was_dict_rule = True
 
     is_nested = _has_nested_rules(expanded_rule)
-    validator = Validator(
-        NATIVE_TYPES,
-        BASIC_TYPES,
-        EXTENDED_TYPES,
-        raise_exceptions,
+    result = validate_object_engine(
+        data,
+        expanded_rule,
+        defaults,
+        raise_exceptions=raise_exceptions,
         mutate=mutate,
         nested=is_nested,
         **kwds,
     )
-
-    result = validator.validate_object(data, expanded_rule, defaults)
 
     if mutate and _was_dict_rule and hasattr(result, 'data'):
         result.data = dict(zip(data.keys(), result.data))
@@ -438,6 +476,7 @@ _PIPE_VALUE_KEYWORDS = frozenset({
     'min:', 'max:', 'between:', 'in:', 'not_in:',
     'starts_with:', 'ends_with:', 'contains:',
     'format:', 're:', 'msg:',
+    'of:', 'length:', 'region:',
 })
 
 _TRANSFORM_MAP = {
@@ -561,7 +600,29 @@ def _expand_pipe_rule(rule: str) -> dict[str, Any]:
             rule_dict[_CSV_KEYS[key]] = _split_csv(_require_value(key, value))
 
         elif key in _VALUE_KEYS:
-            rule_dict[_VALUE_KEYS[key]] = _require_value(key, value)
+            v = _require_value(key, value)
+            if key == 'contains' and ',' in v:
+                rule_dict[_VALUE_KEYS[key]] = tuple(item.strip() for item in v.split(','))
+            else:
+                rule_dict[_VALUE_KEYS[key]] = v
+
+        elif key == 'of':
+            all_types = set(BASIC_TYPES + EXTENDED_TYPES)
+            values = _split_csv(_require_value(key, value))
+            for t in values:
+                if t not in all_types:
+                    raise ValueError(f'Unknown type {t!r} in of: modifier in rule: {rule!r}')
+            rule_dict['items'] = values  # tuple of type name strings
+
+        elif key == 'length':
+            v = _require_value(key, value)
+            try:
+                rule_dict['length'] = int(v)
+            except (ValueError, TypeError):
+                raise ValueError(f'"length" requires an integer value in rule: {rule!r}')
+
+        elif key == 'region':
+            rule_dict['region'] = _require_value(key, value)
 
         elif key == 'msg':
             rule_dict['message'] = value or ''

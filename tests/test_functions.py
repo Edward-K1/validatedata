@@ -5,7 +5,7 @@ from validatedata.validatedata import (
     expand_rule,
     validate_types,
 )
-from validatedata.validator import ValidationError
+from validatedata import ValidationError
 from validatedata.messages import error_messages
 from .base import BaseTest
 

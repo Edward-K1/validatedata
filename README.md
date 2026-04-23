@@ -4,7 +4,57 @@
 
 An easier way to validate data in python.
 
-Validatedata is for when you want expressive, inline validation rules without defining model classes. It is not a Pydantic alternative — it is a different tool for a different workflow: scripts, lightweight APIs, CLI tools, and anywhere defining a full model class feels like overkill.
+**Two validation modes, one simple syntax.**
+
+- **High‑performance mode** – use `validator()` to compile rules into fast boolean callables. Ideal for data streams, and anywhere you need maximum throughput.  
+
+- **General‑purpose mode** – use `validate_data` or decorators (`@validate`, `@validate_types`) to get detailed error messages, nested validation, and optional mutation. Perfect for light APIs, CLI tools, scripts, and forms.
+
+Validatedata gives you expressive, inline validation rules without defining model classes. It fits naturally into any Python workflow – from lightweight scripts to high‑volume data processing.
+
+**New in v0.5:** The `validator()` fast path for dramatic performance gains (see benchmarks below).
+
+### Benchmarks (1 million repetitions)
+| Test | validatedata | manual | pydantic v2 | msgspec | beartype | fastjsonschema |
+|------|-------------|--------|-------------|---------|----------|----------------|
+| Scalar: type (int) | 0.1109s | 0.0842s | 0.4254s | 0.0793s | 0.3594s | 0.1478s |
+| Scalar: type + range | 0.1508s | 0.1286s | 0.1314s | 0.1353s | 0.3841s | 0.1493s |
+| Dict  (valid) | 1.9438s | 1.1996s | 1.8246s | 1.2350s | 3.8948s | 2.8658s |
+| Dict (invalid) | 0.2644s | 0.5856s | 2.1661s | 1.1895s | 2.0818s | 2.7938s |
+
+
+## Fast validation with `validator()`
+
+When you only need a **boolean pass/fail** result (no error messages), use `validator()`. It compiles a rule into a callable that returns `True` or `False` with minimal overhead. Its faster than Pydantic v2 and msgspec on invalid data dicts.
+
+The performance advantage of the *validator* function on invalid data comes from early‑exit optimisations. Other libraries often have to validate everything and report errors.
+
+```python
+from validatedata import validator
+
+# Single value – pipe syntax
+is_valid_username = validator('str|min:3|max:32')
+is_valid_username('alice')      # True
+is_valid_username('a')          # False
+
+# Multiple fields – flat dict rule
+validate_user = validator({
+    'username': 'str|min:3|max:32',
+    'email':    'email',
+    'age':      'int|min:18'
+})
+
+validate_user({'username': 'bob', 'email': 'bob@example.com', 'age': 25})   # True
+validate_user({'username': 'bob', 'email': 'bob@example.com', 'age': 15})   # False
+
+# Parameterized containers
+is_str_list = validator('list[str]')
+is_str_list(['a', 'b', 'c'])    # True
+is_str_list(['a', 1, 'c'])      # False
+
+is_str_or_int_list = validator('list[str,int]')
+is_str_or_int_list(['a', 1, 'c'])   # True
+```
 
 ## Installation
 
@@ -45,23 +95,23 @@ else:
     print(result.errors)
 ```
 
-> With the  `keys` wrapper
->
-> ```python
-> rule = {'keys': {
->     'username': 'str|min:3|max:32',
->     'email': 'email',
->     'age': 'int|min:18',
-> }}
-> ```
->
-> The `keys` form is recommended when you need to pair field rules with top-level options (such as `strict_keys` in a future release).
 
 ---
 
-## Three Ways to Validate
+## Four Ways to Validate
 
-### 1. validate_types decorator
+## 1. validator (for high performance)
+ ```python
+ from validatedata import validator
+ 
+ is_valid_username = validator('str|min:3|max:32')
+ if is_valid_username('alice'):
+     do_xyz()
+ 
+ ```
+
+
+### 2. validate_types decorator
 
 Validates function arguments against their Python type annotations. Works with or without brackets.
 
@@ -84,7 +134,7 @@ result = create_user('alice', 'thirty')
 # returns {'errors': [...]} instead of raising
 ```
 
-### 2. validate decorator
+### 3. validate decorator
 
 ```python
 from validatedata import validate
@@ -113,17 +163,7 @@ user.signup('alice_99', 'alice@example.com', 'Secure@123')  # works
 user.signup('alice_99', 'not-an-email', 'weak')              # raises ValidationError
 ```
 
-Async functions are supported. The decorator behaves identically:
-```python
-from validatedata import validate
-
-@validate(signup_rules, raise_exceptions=True)
-async def signup(self, username, email, password):
-    await db.save(username, email, password)
-    return 'Account Created'
-```
-
-`validate_types` works the same way with async functions.
+Async functions are supported. Both `validate` and `validate_types` decorators behaves identically:
 
 
 Class methods:
@@ -136,7 +176,7 @@ class User:
         return f'{firstname} {lastname}'
 ```
 
-### 3. validate_data function
+### 4. validate_data function
 
 ```python
 from validatedata import validate_data
@@ -154,17 +194,34 @@ else:
     print(result.errors)
 ```
 
-Dict input:
+>The keys format is for when you need to add top level config options in a future release
+
+## Mirror‑structure rules
+
+Instead of writing explicit {'type': 'dict', 'fields': {...}} for nested data, you can write a rule that mirrors the shape of your data. This is supported by validate_data, validate. The `validator` function only supports flat dicts in the current release
 
 ```python
-rules = {'keys': {
-    'username': {'type': 'str', 'range': (3, 32)},
-    'age': {'type': 'int', 'range': (18, 'any'), 'range-message': 'must be 18 or older'}
-}}
+from validatedata import validate_data
 
-result = validate_data(data={'username': 'alice', 'age': 25}, rule=rules)
+data = {
+    'app': {
+        'name':    'QuickScript',
+        'version': '1.0.0',
+    }
+}
+
+
+# mirror structure (no 'type', 'fields', or 'items' keys)
+rule = {
+    'app': {
+        'name':    'str|min:3',
+        'version': 'semver',
+    }
+}
+
+result = validate_data(data, rule)
+print(result.ok)   # True
 ```
-
 ---
 
 ## Parameters
