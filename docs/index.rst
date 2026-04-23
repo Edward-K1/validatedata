@@ -19,15 +19,20 @@ An easier way to validate data in python.
 
 Validatedata gives you expressive, inline validation rules without defining model classes. It fits naturally into any Python workflow – from lightweight scripts to high‑volume data processing.
 
-**New in v0.5:** The `validator()` fast path for dramatic performance gains (see benchmarks below).
+**New in v0.5:** The validator() fast path for dramatic performance gains (see benchmarks below).
 
-### Benchmarks (1 million repetitions)
-| Test | validatedata | manual | pydantic v2 | msgspec | beartype | fastjsonschema |
-|------|-------------|--------|-------------|---------|----------|----------------|
-| Scalar: type (int) | 0.1109s | 0.0842s | 0.4254s | 0.0793s | 0.3594s | 0.1478s |
-| Scalar: type + range | 0.1508s | 0.1286s | 0.1314s | 0.1353s | 0.3841s | 0.1493s |
-| Dict  (valid) | 1.9438s | 1.1996s | 1.8246s | 1.2350s | 3.8948s | 2.8658s |
-| Dict (invalid) | 0.2644s | 0.5856s | 2.1661s | 1.1895s | 2.0818s | 2.7938s |
+Benchmarks (1 million repetitions)
++----------------------+--------------+--------+-------------+---------+----------+----------------+
+| Test                 | validatedata | manual | pydantic v2 | msgspec | beartype | fastjsonschema |
++======================+==============+========+=============+=========+==========+================+
+| Scalar: type (int)   | 0.1109s      | 0.0842s| 0.4254s     | 0.0793s | 0.3594s  | 0.1478s        |
++----------------------+--------------+--------+-------------+---------+----------+----------------+
+| Scalar: type + range | 0.1508s      | 0.1286s| 0.1314s     | 0.1353s | 0.3841s  | 0.1493s        |
++----------------------+--------------+--------+-------------+---------+----------+----------------+
+| Dict (valid)         | 1.9438s      | 1.1996s| 1.8246s     | 1.2350s | 3.8948s  | 2.8658s        |
++----------------------+--------------+--------+-------------+---------+----------+----------------+
+| Dict (invalid)       | 0.2644s      | 0.5856s| 2.1661s     | 1.1895s | 2.0818s  | 2.7938s        |
++----------------------+--------------+--------+-------------+---------+----------+----------------+
 
 
 **Key features**

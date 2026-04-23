@@ -7,7 +7,7 @@ contrived data.
 
 ----
 
-## Fast validation with `validator()`
+Fast validation with `validator()`
 -------------------------------------
 
 When you only need a **boolean pass/fail** result (no error messages), use `validator()`. It compiles a rule into a callable that returns `True` or `False` with minimal overhead. Its faster than Pydantic v2 and msgspec on invalid data dicts.
@@ -16,30 +16,30 @@ The performance advantage of the *validator* function on invalid data comes from
 
 .. code-block:: python
 
-from validatedata import validator
-
-# Single value – pipe syntax
-is_valid_username = validator('str|min:3|max:32')
-is_valid_username('alice')      # True
-is_valid_username('a')          # False
-
-# Multiple fields – flat dict rule
-validate_user = validator({
-    'username': 'str|min:3|max:32',
-    'email':    'email',
-    'age':      'int|min:18'
-})
-
-validate_user({'username': 'bob', 'email': 'bob@example.com', 'age': 25})   # True
-validate_user({'username': 'bob', 'email': 'bob@example.com', 'age': 15})   # False
-
-# Parameterized containers
-is_str_list = validator('list[str]')
-is_str_list(['a', 'b', 'c'])    # True
-is_str_list(['a', 1, 'c'])      # False
-
-is_str_or_int_list = validator('list[str,int]')
-is_str_or_int_list(['a', 1, 'c'])   # True
+    from validatedata import validator
+    
+    # Single value – pipe syntax
+    is_valid_username = validator('str|min:3|max:32')
+    is_valid_username('alice')      # True
+    is_valid_username('a')          # False
+    
+    # Multiple fields – flat dict rule
+    validate_user = validator({
+        'username': 'str|min:3|max:32',
+        'email':    'email',
+        'age':      'int|min:18'
+    })
+    
+    validate_user({'username': 'bob', 'email': 'bob@example.com', 'age': 25})   # True
+    validate_user({'username': 'bob', 'email': 'bob@example.com', 'age': 15})   # False
+    
+    # Parameterized containers
+    is_str_list = validator('list[str]')
+    is_str_list(['a', 'b', 'c'])    # True
+    is_str_list(['a', 1, 'c'])      # False
+    
+    is_str_or_int_list = validator('list[str,int]')
+    is_str_or_int_list(['a', 1, 'c'])   # True
 
 
 User registration
