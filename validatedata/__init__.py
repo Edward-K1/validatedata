@@ -2,7 +2,7 @@ from .validatedata import validate, validate_data, validate_types, ValidationRes
 from .engine import ValidationError, cache
 from .compiled import validator
 
-__version__ = '0.4.1'
+__version__ = '0.5.0'
 
 __all__ = [
     'validate',
