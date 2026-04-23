@@ -6,4 +6,5 @@ temp/
 build/
 validatedata.egg-info/
 deploy.sh
+scripts/*
 
