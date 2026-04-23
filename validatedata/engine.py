@@ -157,12 +157,11 @@ def _has_nested_rules(rules: Any) -> bool:
 # Module-level regex constants
 # ---------------------------------------------------------------------------
 
-_EMAIL_RE = re.compile(
-    r"""^(([^<>()\[\]\\.,;:\s@\"]+(\.[^<>()\[\]\\.,;:\s@\"]+)*)|(\".+\"))
-        @((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])
-        |(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$""",
-    re.VERBOSE,
-)
+
+_EMAIL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+
+
+
 
 # User regex cache: pattern string -> compiled Pattern
 _EXPRESSION_CACHE: dict[str, re.Pattern] = {}
@@ -285,6 +284,8 @@ def check_type(value: Any, spec: TypeSpec) -> bool:
             return False
 
     if name == 'email':
+        if not value or len(str(value)) > 254 or "@" not in str(value):
+            return False
         return _EMAIL_RE.match(str(value)) is not None
 
     if name == 'even':

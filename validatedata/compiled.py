@@ -98,14 +98,155 @@ _LEN_TYPES: frozenset[str] = frozenset({
 _VAL_TYPES: frozenset[str] = frozenset({'int', 'float', 'even', 'odd', 'prime', 'bool'})
 
 
-def _select_min_fn(type_name: str) -> Callable:
-    return _validate_min_len if type_name in _LEN_TYPES else _validate_min_val
+# ---------------------------------------------------------------------------
+# Inline range-check factories
+#
+# These close over the bounds at compile time and perform the comparison
+# in a single call — no _bind wrapper, no intermediate function, no tuple
+# unpack.  They replace the previous _bind(_validate_between_val, (lo, hi))
+# pattern for min / max / between on both value and length types.
+# ---------------------------------------------------------------------------
 
-def _select_max_fn(type_name: str) -> Callable:
-    return _validate_max_len if type_name in _LEN_TYPES else _validate_max_val
+def _mk_min_val(lo: int | float) -> Callable[[Any], bool]:
+    return lambda v, _lo=lo: v >= _lo
 
-def _select_between_fn(type_name: str) -> Callable:
-    return _validate_between_len if type_name in _LEN_TYPES else _validate_between_val
+def _mk_max_val(hi: int | float) -> Callable[[Any], bool]:
+    return lambda v, _hi=hi: v <= _hi
+
+def _mk_between_val(lo: int | float, hi: int | float) -> Callable[[Any], bool]:
+    return lambda v, _lo=lo, _hi=hi: _lo <= v <= _hi
+
+def _mk_min_len(lo: int | float) -> Callable[[Any], bool]:
+    return lambda v, _lo=lo: len(v) >= _lo
+
+def _mk_max_len(hi: int | float) -> Callable[[Any], bool]:
+    return lambda v, _hi=hi: len(v) <= _hi
+
+def _mk_between_len(lo: int | float, hi: int | float) -> Callable[[Any], bool]:
+    return lambda v, _lo=lo, _hi=hi: _lo <= len(v) <= _hi
+
+
+def _make_min(type_name: str, lo: int | float) -> Callable[[Any], bool]:
+    return _mk_min_len(lo) if type_name in _LEN_TYPES else _mk_min_val(lo)
+
+def _make_max(type_name: str, hi: int | float) -> Callable[[Any], bool]:
+    return _mk_max_len(hi) if type_name in _LEN_TYPES else _mk_max_val(hi)
+
+def _make_between(type_name: str, lo: int | float, hi: int | float) -> Callable[[Any], bool]:
+    return _mk_between_len(lo, hi) if type_name in _LEN_TYPES else _mk_between_val(lo, hi)
+
+
+# ---------------------------------------------------------------------------
+# Fused type-and-range factories
+#
+# For the common pattern (strict type + sole range check) these collapse the
+# two-closure chain — c0(v) and c1(v) — into a single closure body.
+#
+# Dedicated factories for int / float / str inline isinstance directly,
+# saving *both* Python call dispatches versus the generic two-check path.
+# All other types (email, url, list, …) use generic factories that capture
+# the pre-built type_check callable, saving one dispatch.
+#
+# The non-strict coercion path (literal_eval) is not fused here; it's handled
+# separately in _build_type_check_callable and is uncommon in practice.
+# ---------------------------------------------------------------------------
+
+# int — value comparisons, isinstance inlined
+def _fused_int_min(lo: int | float) -> Callable[[Any], bool]:
+    return lambda v, _lo=lo: isinstance(v, int) and v >= _lo
+
+def _fused_int_max(hi: int | float) -> Callable[[Any], bool]:
+    return lambda v, _hi=hi: isinstance(v, int) and v <= _hi
+
+def _fused_int_between(lo: int | float, hi: int | float) -> Callable[[Any], bool]:
+    return lambda v, _lo=lo, _hi=hi: isinstance(v, int) and _lo <= v <= _hi
+
+# float — value comparisons, isinstance inlined
+def _fused_float_min(lo: int | float) -> Callable[[Any], bool]:
+    return lambda v, _lo=lo: isinstance(v, float) and v >= _lo
+
+def _fused_float_max(hi: int | float) -> Callable[[Any], bool]:
+    return lambda v, _hi=hi: isinstance(v, float) and v <= _hi
+
+def _fused_float_between(lo: int | float, hi: int | float) -> Callable[[Any], bool]:
+    return lambda v, _lo=lo, _hi=hi: isinstance(v, float) and _lo <= v <= _hi
+
+# str — length comparisons, isinstance inlined
+def _fused_str_min(lo: int | float) -> Callable[[Any], bool]:
+    return lambda v, _lo=lo: isinstance(v, str) and len(v) >= _lo
+
+def _fused_str_max(hi: int | float) -> Callable[[Any], bool]:
+    return lambda v, _hi=hi: isinstance(v, str) and len(v) <= _hi
+
+def _fused_str_between(lo: int | float, hi: int | float) -> Callable[[Any], bool]:
+    return lambda v, _lo=lo, _hi=hi: isinstance(v, str) and _lo <= len(v) <= _hi
+
+# Generic — captures a pre-built type_check callable for all other types.
+# Saves one Python call dispatch compared to the two-check chain.
+def _fused_tc_val_min(tc: Callable, lo: int | float) -> Callable[[Any], bool]:
+    return lambda v, _tc=tc, _lo=lo: _tc(v) and v >= _lo
+
+def _fused_tc_val_max(tc: Callable, hi: int | float) -> Callable[[Any], bool]:
+    return lambda v, _tc=tc, _hi=hi: _tc(v) and v <= _hi
+
+def _fused_tc_val_between(tc: Callable, lo: int | float, hi: int | float) -> Callable[[Any], bool]:
+    return lambda v, _tc=tc, _lo=lo, _hi=hi: _tc(v) and _lo <= v <= _hi
+
+def _fused_tc_len_min(tc: Callable, lo: int | float) -> Callable[[Any], bool]:
+    return lambda v, _tc=tc, _lo=lo: _tc(v) and len(v) >= _lo
+
+def _fused_tc_len_max(tc: Callable, hi: int | float) -> Callable[[Any], bool]:
+    return lambda v, _tc=tc, _hi=hi: _tc(v) and len(v) <= _hi
+
+def _fused_tc_len_between(tc: Callable, lo: int | float, hi: int | float) -> Callable[[Any], bool]:
+    return lambda v, _tc=tc, _lo=lo, _hi=hi: _tc(v) and _lo <= len(v) <= _hi
+
+
+def _try_fuse_type_range(
+    type_name: str,
+    type_check: Callable[[Any], bool],
+    lo: int | float | None,
+    hi: int | float | None,
+) -> Callable[[Any], bool]:
+    """Fuse a strict type check + range bounds into a single closure.
+
+    Called only when:
+      - effective_strict is True (non-strict uses literal_eval; not fused)
+      - no other validators are present (|in:, |contains:, etc.)
+      - transform_fn is None
+      - not a parameterized type (list[str], etc.)
+
+    Dedicated paths for int / float / str inline isinstance directly.
+    All other types fall through to the generic tc-capture path.
+    """
+    has_lo = lo is not None
+    has_hi = hi is not None
+    use_len = type_name in _LEN_TYPES
+
+    if type_name == 'int':
+        if has_lo and has_hi: return _fused_int_between(lo, hi)    # type: ignore[arg-type]
+        if has_lo:            return _fused_int_min(lo)             # type: ignore[arg-type]
+        return                       _fused_int_max(hi)             # type: ignore[arg-type]
+
+    if type_name == 'float':
+        if has_lo and has_hi: return _fused_float_between(lo, hi)   # type: ignore[arg-type]
+        if has_lo:            return _fused_float_min(lo)            # type: ignore[arg-type]
+        return                       _fused_float_max(hi)            # type: ignore[arg-type]
+
+    if type_name == 'str':
+        if has_lo and has_hi: return _fused_str_between(lo, hi)     # type: ignore[arg-type]
+        if has_lo:            return _fused_str_min(lo)              # type: ignore[arg-type]
+        return                       _fused_str_max(hi)              # type: ignore[arg-type]
+
+    # Generic path for all other types (email, url, list, dict, etc.)
+    if use_len:
+        if has_lo and has_hi: return _fused_tc_len_between(type_check, lo, hi)  # type: ignore[arg-type]
+        if has_lo:            return _fused_tc_len_min(type_check, lo)           # type: ignore[arg-type]
+        return                       _fused_tc_len_max(type_check, hi)           # type: ignore[arg-type]
+    else:
+        if has_lo and has_hi: return _fused_tc_val_between(type_check, lo, hi)  # type: ignore[arg-type]
+        if has_lo:            return _fused_tc_val_min(type_check, lo)           # type: ignore[arg-type]
+        return                       _fused_tc_val_max(type_check, hi)           # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -424,6 +565,10 @@ def _compile_pipe_rule(
     max_val: str | None = None
     between_seen: bool = False
     seen_validator: bool = False
+    # Deferred range bounds — kept as raw floats so _try_fuse_type_range can
+    # combine them with the type check into a single closure at build time.
+    _fuse_lo: int | float | None = None
+    _fuse_hi: int | float | None = None
 
     for token in tokens[1:]:
         key, _, value = token.partition(':')
@@ -569,8 +714,8 @@ def _compile_pipe_rule(
                 )
             lo = _coerce_range_val(parts[0].strip())
             hi = _coerce_range_val(parts[1].strip())
-            bet_fn = _select_between_fn(type_name)
-            validators.append(_bind(bet_fn, (lo, hi)))
+            _fuse_lo = lo
+            _fuse_hi = hi
             between_seen = True
             continue
 
@@ -590,14 +735,14 @@ def _compile_pipe_rule(
         if min_val is not None and max_val is not None:
             lo = _coerce_range_val(min_val)
             hi = _coerce_range_val(max_val)
-            bet_fn = _select_between_fn(type_name)
-            validators.append(_bind(bet_fn, (lo, hi)))
+            _fuse_lo = lo
+            _fuse_hi = hi
         elif min_val is not None:
             lo = _coerce_range_val(min_val)
-            validators.append(_bind(_select_min_fn(type_name), lo))
+            _fuse_lo = lo
         else:
             hi = _coerce_range_val(max_val)  # type: ignore[arg-type]
-            validators.append(_bind(_select_max_fn(type_name), hi))
+            _fuse_hi = hi
 
     # --- resolve effective strict ---
     # Match engine defaults: False for date/regex (accepts strings), True for all others.
@@ -622,6 +767,29 @@ def _compile_pipe_rule(
         )
     else:
         transform_fn = None
+
+    # --- Fusion: type check + sole range bound → single closure ---
+    # Conditions: strict type, no other validators (|in:, |contains:, …),
+    # no transform, and not a parameterized type (list[str], etc.).
+    # Non-strict types embed literal_eval in their type_check; fusing the
+    # range would require duplicating coercion logic for minimal gain.
+    if (
+        (_fuse_lo is not None or _fuse_hi is not None)
+        and not validators
+        and transform_fn is None
+        and effective_strict
+        and _item_type_names is None
+    ):
+        return None, [_try_fuse_type_range(type_name, type_check, _fuse_lo, _fuse_hi)], nullable
+
+    # No fusion — materialise the range check and append to validators normally.
+    if _fuse_lo is not None or _fuse_hi is not None:
+        if _fuse_lo is not None and _fuse_hi is not None:
+            validators.append(_make_between(type_name, _fuse_lo, _fuse_hi))
+        elif _fuse_lo is not None:
+            validators.append(_make_min(type_name, _fuse_lo))
+        else:
+            validators.append(_make_max(type_name, _fuse_hi))
 
     checks = [type_check] + validators
     return transform_fn, checks, nullable
@@ -681,11 +849,12 @@ def _make_callable(
 
 def _compile_dict_rule(
     rule: dict,
-) -> dict[str, Callable[[Any], bool]]:
-    """Compile a flat {field: pipe_rule_string} dict into compiled field callables.
+) -> list[tuple[str, Callable[[Any], bool], bool]]:
+    """Compile a flat {field: pipe_rule_string} dict into compiled field specs.
 
-    Called once at validator time. The returned dict is iterated at
-    every validation call — there is no further compilation at call time.
+    Returns a list of (field, check_callable, nullable) triples. The nullable
+    flag is surfaced separately so _make_dict_callable can choose the fastest
+    field-access strategy at build time rather than at every call.
 
     Raises ValueError if any rule value is a dict or list (nested rules are
     not supported in this pass — use validate_data instead).
@@ -703,11 +872,705 @@ def _compile_dict_rule(
                 f"(field {field!r} has type {type(value).__name__!r})."
             )
 
-    compiled: dict[str, Callable[[Any], bool]] = {}
+    result: list[tuple[str, Callable[[Any], bool], bool]] = []
     for field, rule_str in rule.items():
         transform, checks, nullable = _compile_pipe_rule(rule_str)
-        compiled[field] = _make_callable(transform, checks, nullable)
-    return compiled
+        result.append((field, _make_callable(transform, checks, nullable), nullable))
+    return result
+
+
+# _DICT_UNROLL_LIMIT controls how many fields get individual unrolled cases.
+# Change this value and re-run scripts/gen_dict_callable.py to regenerate.
+_DICT_UNROLL_LIMIT: int = 15
+
+# --- BEGIN GENERATED CODE: _make_dict_callable ---
+
+def _make_dict_callable(
+    field_specs: list[tuple[str, Callable[[Any], bool], bool]],
+) -> Callable[[Any], bool]:
+    """Build the dict-validator callable from compiled field specs.
+
+    Two strategies are selected at compile time, not call time:
+
+    all-required (no nullable fields)
+        Use ``data[field]`` (direct C-level hash lookup, no default-value
+        overhead) wrapped in a single outer ``try/except KeyError``.  The
+        happy path — a valid dict with every key present — pays only the
+        hash lookup, never the attribute-lookup + call overhead of
+        ``dict.get``.
+
+    has-nullable fields
+        Fall back to ``data.get(field)`` so that missing keys and explicit
+        ``None`` are treated identically, consistent with validate_data.
+
+    Cases 1–15 are unrolled (generated by scripts/gen_dict_callable.py).
+    Cases beyond the limit fall through to a general loop.
+    To change the limit: update _DICT_UNROLL_LIMIT in compiled.py and
+    re-run the generator.
+    """
+    n = len(field_specs)
+    all_required = not any(nullable for _, _, nullable in field_specs)
+    # Pre-bake as a tuple so the fallback loop avoids .items() overhead.
+    items: tuple[tuple[str, Callable[[Any], bool]], ...] = tuple(
+        (f, c) for f, c, _ in field_specs
+    )
+
+    if n == 0:
+        return lambda data: isinstance(data, dict)
+
+    if all_required:
+        # --- all-required: direct subscript + single outer try/except ---
+        # KeyError is the only exception we need to handle (missing key).
+        # Check calls are outside the try block so unrelated KeyErrors from
+        # within a validator do not get swallowed.
+        if n == 1:
+            (f0, c0), = items
+            def fn(data: Any) -> bool:
+                if not isinstance(data, dict): return False
+                try: v0 = data[f0]
+                except KeyError: return False
+                return c0(v0)
+        elif n == 2:
+            (f0, c0), (f1, c1) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                try: v0 = data[f0]
+                except KeyError: return False
+                if not c0(v0): return False
+                try: v1 = data[f1]
+                except KeyError: return False
+                return c1(v1)
+        elif n == 3:
+            (f0, c0), (f1, c1), (f2, c2) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                try: v0 = data[f0]
+                except KeyError: return False
+                if not c0(v0): return False
+                try: v1 = data[f1]
+                except KeyError: return False
+                if not c1(v1): return False
+                try: v2 = data[f2]
+                except KeyError: return False
+                return c2(v2)
+        elif n == 4:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                try: v0 = data[f0]
+                except KeyError: return False
+                if not c0(v0): return False
+                try: v1 = data[f1]
+                except KeyError: return False
+                if not c1(v1): return False
+                try: v2 = data[f2]
+                except KeyError: return False
+                if not c2(v2): return False
+                try: v3 = data[f3]
+                except KeyError: return False
+                return c3(v3)
+        elif n == 5:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                try: v0 = data[f0]
+                except KeyError: return False
+                if not c0(v0): return False
+                try: v1 = data[f1]
+                except KeyError: return False
+                if not c1(v1): return False
+                try: v2 = data[f2]
+                except KeyError: return False
+                if not c2(v2): return False
+                try: v3 = data[f3]
+                except KeyError: return False
+                if not c3(v3): return False
+                try: v4 = data[f4]
+                except KeyError: return False
+                return c4(v4)
+        elif n == 6:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4), (f5, c5) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                try: v0 = data[f0]
+                except KeyError: return False
+                if not c0(v0): return False
+                try: v1 = data[f1]
+                except KeyError: return False
+                if not c1(v1): return False
+                try: v2 = data[f2]
+                except KeyError: return False
+                if not c2(v2): return False
+                try: v3 = data[f3]
+                except KeyError: return False
+                if not c3(v3): return False
+                try: v4 = data[f4]
+                except KeyError: return False
+                if not c4(v4): return False
+                try: v5 = data[f5]
+                except KeyError: return False
+                return c5(v5)
+        elif n == 7:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4), (f5, c5), (f6, c6) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                try: v0 = data[f0]
+                except KeyError: return False
+                if not c0(v0): return False
+                try: v1 = data[f1]
+                except KeyError: return False
+                if not c1(v1): return False
+                try: v2 = data[f2]
+                except KeyError: return False
+                if not c2(v2): return False
+                try: v3 = data[f3]
+                except KeyError: return False
+                if not c3(v3): return False
+                try: v4 = data[f4]
+                except KeyError: return False
+                if not c4(v4): return False
+                try: v5 = data[f5]
+                except KeyError: return False
+                if not c5(v5): return False
+                try: v6 = data[f6]
+                except KeyError: return False
+                return c6(v6)
+        elif n == 8:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4), (f5, c5), (f6, c6), (f7, c7) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                try: v0 = data[f0]
+                except KeyError: return False
+                if not c0(v0): return False
+                try: v1 = data[f1]
+                except KeyError: return False
+                if not c1(v1): return False
+                try: v2 = data[f2]
+                except KeyError: return False
+                if not c2(v2): return False
+                try: v3 = data[f3]
+                except KeyError: return False
+                if not c3(v3): return False
+                try: v4 = data[f4]
+                except KeyError: return False
+                if not c4(v4): return False
+                try: v5 = data[f5]
+                except KeyError: return False
+                if not c5(v5): return False
+                try: v6 = data[f6]
+                except KeyError: return False
+                if not c6(v6): return False
+                try: v7 = data[f7]
+                except KeyError: return False
+                return c7(v7)
+        elif n == 9:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4), (f5, c5), (f6, c6), (f7, c7), (f8, c8) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                try: v0 = data[f0]
+                except KeyError: return False
+                if not c0(v0): return False
+                try: v1 = data[f1]
+                except KeyError: return False
+                if not c1(v1): return False
+                try: v2 = data[f2]
+                except KeyError: return False
+                if not c2(v2): return False
+                try: v3 = data[f3]
+                except KeyError: return False
+                if not c3(v3): return False
+                try: v4 = data[f4]
+                except KeyError: return False
+                if not c4(v4): return False
+                try: v5 = data[f5]
+                except KeyError: return False
+                if not c5(v5): return False
+                try: v6 = data[f6]
+                except KeyError: return False
+                if not c6(v6): return False
+                try: v7 = data[f7]
+                except KeyError: return False
+                if not c7(v7): return False
+                try: v8 = data[f8]
+                except KeyError: return False
+                return c8(v8)
+        elif n == 10:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4), (f5, c5), (f6, c6), (f7, c7), (f8, c8), (f9, c9) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                try: v0 = data[f0]
+                except KeyError: return False
+                if not c0(v0): return False
+                try: v1 = data[f1]
+                except KeyError: return False
+                if not c1(v1): return False
+                try: v2 = data[f2]
+                except KeyError: return False
+                if not c2(v2): return False
+                try: v3 = data[f3]
+                except KeyError: return False
+                if not c3(v3): return False
+                try: v4 = data[f4]
+                except KeyError: return False
+                if not c4(v4): return False
+                try: v5 = data[f5]
+                except KeyError: return False
+                if not c5(v5): return False
+                try: v6 = data[f6]
+                except KeyError: return False
+                if not c6(v6): return False
+                try: v7 = data[f7]
+                except KeyError: return False
+                if not c7(v7): return False
+                try: v8 = data[f8]
+                except KeyError: return False
+                if not c8(v8): return False
+                try: v9 = data[f9]
+                except KeyError: return False
+                return c9(v9)
+        elif n == 11:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4), (f5, c5), (f6, c6), (f7, c7), (f8, c8), (f9, c9), (f10, c10) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                try: v0 = data[f0]
+                except KeyError: return False
+                if not c0(v0): return False
+                try: v1 = data[f1]
+                except KeyError: return False
+                if not c1(v1): return False
+                try: v2 = data[f2]
+                except KeyError: return False
+                if not c2(v2): return False
+                try: v3 = data[f3]
+                except KeyError: return False
+                if not c3(v3): return False
+                try: v4 = data[f4]
+                except KeyError: return False
+                if not c4(v4): return False
+                try: v5 = data[f5]
+                except KeyError: return False
+                if not c5(v5): return False
+                try: v6 = data[f6]
+                except KeyError: return False
+                if not c6(v6): return False
+                try: v7 = data[f7]
+                except KeyError: return False
+                if not c7(v7): return False
+                try: v8 = data[f8]
+                except KeyError: return False
+                if not c8(v8): return False
+                try: v9 = data[f9]
+                except KeyError: return False
+                if not c9(v9): return False
+                try: v10 = data[f10]
+                except KeyError: return False
+                return c10(v10)
+        elif n == 12:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4), (f5, c5), (f6, c6), (f7, c7), (f8, c8), (f9, c9), (f10, c10), (f11, c11) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                try: v0 = data[f0]
+                except KeyError: return False
+                if not c0(v0): return False
+                try: v1 = data[f1]
+                except KeyError: return False
+                if not c1(v1): return False
+                try: v2 = data[f2]
+                except KeyError: return False
+                if not c2(v2): return False
+                try: v3 = data[f3]
+                except KeyError: return False
+                if not c3(v3): return False
+                try: v4 = data[f4]
+                except KeyError: return False
+                if not c4(v4): return False
+                try: v5 = data[f5]
+                except KeyError: return False
+                if not c5(v5): return False
+                try: v6 = data[f6]
+                except KeyError: return False
+                if not c6(v6): return False
+                try: v7 = data[f7]
+                except KeyError: return False
+                if not c7(v7): return False
+                try: v8 = data[f8]
+                except KeyError: return False
+                if not c8(v8): return False
+                try: v9 = data[f9]
+                except KeyError: return False
+                if not c9(v9): return False
+                try: v10 = data[f10]
+                except KeyError: return False
+                if not c10(v10): return False
+                try: v11 = data[f11]
+                except KeyError: return False
+                return c11(v11)
+        elif n == 13:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4), (f5, c5), (f6, c6), (f7, c7), (f8, c8), (f9, c9), (f10, c10), (f11, c11), (f12, c12) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                try: v0 = data[f0]
+                except KeyError: return False
+                if not c0(v0): return False
+                try: v1 = data[f1]
+                except KeyError: return False
+                if not c1(v1): return False
+                try: v2 = data[f2]
+                except KeyError: return False
+                if not c2(v2): return False
+                try: v3 = data[f3]
+                except KeyError: return False
+                if not c3(v3): return False
+                try: v4 = data[f4]
+                except KeyError: return False
+                if not c4(v4): return False
+                try: v5 = data[f5]
+                except KeyError: return False
+                if not c5(v5): return False
+                try: v6 = data[f6]
+                except KeyError: return False
+                if not c6(v6): return False
+                try: v7 = data[f7]
+                except KeyError: return False
+                if not c7(v7): return False
+                try: v8 = data[f8]
+                except KeyError: return False
+                if not c8(v8): return False
+                try: v9 = data[f9]
+                except KeyError: return False
+                if not c9(v9): return False
+                try: v10 = data[f10]
+                except KeyError: return False
+                if not c10(v10): return False
+                try: v11 = data[f11]
+                except KeyError: return False
+                if not c11(v11): return False
+                try: v12 = data[f12]
+                except KeyError: return False
+                return c12(v12)
+        elif n == 14:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4), (f5, c5), (f6, c6), (f7, c7), (f8, c8), (f9, c9), (f10, c10), (f11, c11), (f12, c12), (f13, c13) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                try: v0 = data[f0]
+                except KeyError: return False
+                if not c0(v0): return False
+                try: v1 = data[f1]
+                except KeyError: return False
+                if not c1(v1): return False
+                try: v2 = data[f2]
+                except KeyError: return False
+                if not c2(v2): return False
+                try: v3 = data[f3]
+                except KeyError: return False
+                if not c3(v3): return False
+                try: v4 = data[f4]
+                except KeyError: return False
+                if not c4(v4): return False
+                try: v5 = data[f5]
+                except KeyError: return False
+                if not c5(v5): return False
+                try: v6 = data[f6]
+                except KeyError: return False
+                if not c6(v6): return False
+                try: v7 = data[f7]
+                except KeyError: return False
+                if not c7(v7): return False
+                try: v8 = data[f8]
+                except KeyError: return False
+                if not c8(v8): return False
+                try: v9 = data[f9]
+                except KeyError: return False
+                if not c9(v9): return False
+                try: v10 = data[f10]
+                except KeyError: return False
+                if not c10(v10): return False
+                try: v11 = data[f11]
+                except KeyError: return False
+                if not c11(v11): return False
+                try: v12 = data[f12]
+                except KeyError: return False
+                if not c12(v12): return False
+                try: v13 = data[f13]
+                except KeyError: return False
+                return c13(v13)
+        elif n == 15:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4), (f5, c5), (f6, c6), (f7, c7), (f8, c8), (f9, c9), (f10, c10), (f11, c11), (f12, c12), (f13, c13), (f14, c14) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                try: v0 = data[f0]
+                except KeyError: return False
+                if not c0(v0): return False
+                try: v1 = data[f1]
+                except KeyError: return False
+                if not c1(v1): return False
+                try: v2 = data[f2]
+                except KeyError: return False
+                if not c2(v2): return False
+                try: v3 = data[f3]
+                except KeyError: return False
+                if not c3(v3): return False
+                try: v4 = data[f4]
+                except KeyError: return False
+                if not c4(v4): return False
+                try: v5 = data[f5]
+                except KeyError: return False
+                if not c5(v5): return False
+                try: v6 = data[f6]
+                except KeyError: return False
+                if not c6(v6): return False
+                try: v7 = data[f7]
+                except KeyError: return False
+                if not c7(v7): return False
+                try: v8 = data[f8]
+                except KeyError: return False
+                if not c8(v8): return False
+                try: v9 = data[f9]
+                except KeyError: return False
+                if not c9(v9): return False
+                try: v10 = data[f10]
+                except KeyError: return False
+                if not c10(v10): return False
+                try: v11 = data[f11]
+                except KeyError: return False
+                if not c11(v11): return False
+                try: v12 = data[f12]
+                except KeyError: return False
+                if not c12(v12): return False
+                try: v13 = data[f13]
+                except KeyError: return False
+                if not c13(v13): return False
+                try: v14 = data[f14]
+                except KeyError: return False
+                return c14(v14)
+        else:
+            # General loop: pre-captured tuple avoids .items() per call.
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                for f, c in items:
+                    try: v = data[f]
+                    except KeyError: return False
+                    if not c(v): return False
+                return True
+    else:
+        # --- has-nullable: use .get() so missing key ≡ None ≡ explicit None ---
+        if n == 1:
+            (f0, c0), = items
+            def fn(data: Any) -> bool:
+                if not isinstance(data, dict): return False
+                return c0(data.get(f0))
+        elif n == 2:
+            (f0, c0), (f1, c1) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                return c0(data.get(f0)) and c1(data.get(f1))
+        elif n == 3:
+            (f0, c0), (f1, c1), (f2, c2) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                return (
+                        c0(data.get(f0))
+                    and c1(data.get(f1))
+                    and c2(data.get(f2))
+                )
+        elif n == 4:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                return (
+                        c0(data.get(f0))
+                    and c1(data.get(f1))
+                    and c2(data.get(f2))
+                    and c3(data.get(f3))
+                )
+        elif n == 5:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                return (
+                        c0(data.get(f0))
+                    and c1(data.get(f1))
+                    and c2(data.get(f2))
+                    and c3(data.get(f3))
+                    and c4(data.get(f4))
+                )
+        elif n == 6:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4), (f5, c5) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                return (
+                        c0(data.get(f0))
+                    and c1(data.get(f1))
+                    and c2(data.get(f2))
+                    and c3(data.get(f3))
+                    and c4(data.get(f4))
+                    and c5(data.get(f5))
+                )
+        elif n == 7:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4), (f5, c5), (f6, c6) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                return (
+                        c0(data.get(f0))
+                    and c1(data.get(f1))
+                    and c2(data.get(f2))
+                    and c3(data.get(f3))
+                    and c4(data.get(f4))
+                    and c5(data.get(f5))
+                    and c6(data.get(f6))
+                )
+        elif n == 8:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4), (f5, c5), (f6, c6), (f7, c7) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                return (
+                        c0(data.get(f0))
+                    and c1(data.get(f1))
+                    and c2(data.get(f2))
+                    and c3(data.get(f3))
+                    and c4(data.get(f4))
+                    and c5(data.get(f5))
+                    and c6(data.get(f6))
+                    and c7(data.get(f7))
+                )
+        elif n == 9:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4), (f5, c5), (f6, c6), (f7, c7), (f8, c8) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                return (
+                        c0(data.get(f0))
+                    and c1(data.get(f1))
+                    and c2(data.get(f2))
+                    and c3(data.get(f3))
+                    and c4(data.get(f4))
+                    and c5(data.get(f5))
+                    and c6(data.get(f6))
+                    and c7(data.get(f7))
+                    and c8(data.get(f8))
+                )
+        elif n == 10:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4), (f5, c5), (f6, c6), (f7, c7), (f8, c8), (f9, c9) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                return (
+                        c0(data.get(f0))
+                    and c1(data.get(f1))
+                    and c2(data.get(f2))
+                    and c3(data.get(f3))
+                    and c4(data.get(f4))
+                    and c5(data.get(f5))
+                    and c6(data.get(f6))
+                    and c7(data.get(f7))
+                    and c8(data.get(f8))
+                    and c9(data.get(f9))
+                )
+        elif n == 11:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4), (f5, c5), (f6, c6), (f7, c7), (f8, c8), (f9, c9), (f10, c10) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                return (
+                        c0(data.get(f0))
+                    and c1(data.get(f1))
+                    and c2(data.get(f2))
+                    and c3(data.get(f3))
+                    and c4(data.get(f4))
+                    and c5(data.get(f5))
+                    and c6(data.get(f6))
+                    and c7(data.get(f7))
+                    and c8(data.get(f8))
+                    and c9(data.get(f9))
+                    and c10(data.get(f10))
+                )
+        elif n == 12:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4), (f5, c5), (f6, c6), (f7, c7), (f8, c8), (f9, c9), (f10, c10), (f11, c11) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                return (
+                        c0(data.get(f0))
+                    and c1(data.get(f1))
+                    and c2(data.get(f2))
+                    and c3(data.get(f3))
+                    and c4(data.get(f4))
+                    and c5(data.get(f5))
+                    and c6(data.get(f6))
+                    and c7(data.get(f7))
+                    and c8(data.get(f8))
+                    and c9(data.get(f9))
+                    and c10(data.get(f10))
+                    and c11(data.get(f11))
+                )
+        elif n == 13:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4), (f5, c5), (f6, c6), (f7, c7), (f8, c8), (f9, c9), (f10, c10), (f11, c11), (f12, c12) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                return (
+                        c0(data.get(f0))
+                    and c1(data.get(f1))
+                    and c2(data.get(f2))
+                    and c3(data.get(f3))
+                    and c4(data.get(f4))
+                    and c5(data.get(f5))
+                    and c6(data.get(f6))
+                    and c7(data.get(f7))
+                    and c8(data.get(f8))
+                    and c9(data.get(f9))
+                    and c10(data.get(f10))
+                    and c11(data.get(f11))
+                    and c12(data.get(f12))
+                )
+        elif n == 14:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4), (f5, c5), (f6, c6), (f7, c7), (f8, c8), (f9, c9), (f10, c10), (f11, c11), (f12, c12), (f13, c13) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                return (
+                        c0(data.get(f0))
+                    and c1(data.get(f1))
+                    and c2(data.get(f2))
+                    and c3(data.get(f3))
+                    and c4(data.get(f4))
+                    and c5(data.get(f5))
+                    and c6(data.get(f6))
+                    and c7(data.get(f7))
+                    and c8(data.get(f8))
+                    and c9(data.get(f9))
+                    and c10(data.get(f10))
+                    and c11(data.get(f11))
+                    and c12(data.get(f12))
+                    and c13(data.get(f13))
+                )
+        elif n == 15:
+            (f0, c0), (f1, c1), (f2, c2), (f3, c3), (f4, c4), (f5, c5), (f6, c6), (f7, c7), (f8, c8), (f9, c9), (f10, c10), (f11, c11), (f12, c12), (f13, c13), (f14, c14) = items
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                return (
+                        c0(data.get(f0))
+                    and c1(data.get(f1))
+                    and c2(data.get(f2))
+                    and c3(data.get(f3))
+                    and c4(data.get(f4))
+                    and c5(data.get(f5))
+                    and c6(data.get(f6))
+                    and c7(data.get(f7))
+                    and c8(data.get(f8))
+                    and c9(data.get(f9))
+                    and c10(data.get(f10))
+                    and c11(data.get(f11))
+                    and c12(data.get(f12))
+                    and c13(data.get(f13))
+                    and c14(data.get(f14))
+                )
+        else:
+            # General loop: pre-captured tuple avoids .items() per call.
+            def fn(data: Any) -> bool:  # type: ignore[misc]
+                if not isinstance(data, dict): return False
+                for f, c in items:
+                    if not c(data.get(f)): return False
+                return True
+
+    return fn
+
+# --- END GENERATED CODE: _make_dict_callable ---
+
 
 
 # ---------------------------------------------------------------------------
@@ -764,18 +1627,8 @@ def validator(rule: str | dict) -> Callable[[Any], bool]:
         transform, checks, nullable = _compile_pipe_rule(rule)
         fn: Callable[[Any], bool] = _make_callable(transform, checks, nullable)
     else:
-        compiled_fields = _compile_dict_rule(rule)
-
-        def fn(data: Any) -> bool:  # type: ignore[misc]
-            """Validate a dict against the compiled field rules."""
-            if not isinstance(data, dict):
-                return False
-            for field, check in compiled_fields.items():
-                # dict.get returns None for both missing keys and explicit None —
-                # both are treated identically, consistent with validate_data behaviour.
-                if not check(data.get(field)):
-                    return False
-            return True
+        field_specs = _compile_dict_rule(rule)
+        fn = _make_dict_callable(field_specs)  # type: ignore[misc]
 
     _cache_set(cache_key, fn)
     return fn
