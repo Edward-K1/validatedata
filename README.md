@@ -54,6 +54,7 @@ is_str_list(['a', 1, 'c'])      # False
 
 is_str_or_int_list = validator('list[str,int]')
 is_str_or_int_list(['a', 1, 'c'])   # True
+```
 
 ## Installation
 
