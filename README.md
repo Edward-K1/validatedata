@@ -64,7 +64,7 @@ validate_user = validator({
     'age':      'int|min:18'
     }, codegen=True)
 
-validate_user({'username': 'bob', 'email': 'bob@example.com', 'age': 19})   # False
+validate_user({'username': 'bob', 'email': 'bob@example.com', 'age': 19})   # True
 
 ```
 
