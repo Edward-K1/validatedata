@@ -54,6 +54,18 @@ is_str_list(['a', 1, 'c'])      # False
 
 is_str_or_int_list = validator('list[str,int]')
 is_str_or_int_list(['a', 1, 'c'])   # True
+
+# If processing millions of records or wish to have the maximum performance
+# on dictionaries, add the parameter codegen=True
+# i.e 
+validate_user = validator({
+    'username': 'str|min:3|max:32',
+    'email':    'email',
+    'age':      'int|min:18'
+    }, codegen=True)
+
+validate_user({'username': 'bob', 'email': 'bob@example.com', 'age': 19})   # False
+
 ```
 
 ## Installation
