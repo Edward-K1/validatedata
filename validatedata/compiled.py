@@ -879,11 +879,6 @@ def _compile_dict_rule(
     return result
 
 
-# _DICT_UNROLL_LIMIT controls how many fields get individual unrolled cases.
-# Change this value and re-run scripts/gen_dict_callable.py to regenerate.
-_DICT_UNROLL_LIMIT: int = 15
-
-# --- BEGIN GENERATED CODE: _make_dict_callable ---
 
 def _make_dict_callable(
     field_specs: list[tuple[str, Callable[[Any], bool], bool]],
@@ -891,41 +886,44 @@ def _make_dict_callable(
     codegen: bool = False,
 ) -> Callable[[Any], bool]:
     """Build the dict-validator callable from compiled field specs.
- 
+
     Two compile-time strategies are selected based on nullability:
- 
+
     all_required (no nullable fields)
-        Use ``data[field]`` (direct C-level hash lookup, no default-value
-        overhead) wrapped in a per-field ``try/except KeyError``.  The
-        happy path — a valid dict with every key present — pays only the
-        hash lookup, never the attribute-lookup + call overhead of
-        ``dict.get``.
- 
-    has_nullable
-        Use ``data.get(field)`` so missing keys and explicit ``None`` are
-        treated identically, consistent with validate_data.
- 
+        Every field uses ``data[field]`` (direct C-level hash lookup, no
+        default-value overhead) wrapped in a per-field ``try/except KeyError``.
+        The happy path — a valid dict with every key present — pays only the
+        hash lookup, never the attribute-lookup + call overhead of ``dict.get``.
+
+    has_nullable (at least one nullable field)
+        Per-field dispatch: required fields still use ``data[field]`` with
+        ``KeyError → False``; nullable fields use ``data.get(field)`` so a
+        missing key and an explicit ``None`` are treated identically,
+        consistent with validate_data.
+
     Args:
         field_specs: Compiled field triples ``(field_name, check, nullable)``.
-        codegen:     When ``True`` (default) emit and ``exec`` a fully
-                     unrolled function body — no loop overhead on the hot
-                     path, unlimited arity.  When ``False`` use a plain
-                     loop — zero compile overhead, easier to debug, picklable.
- 
+        codegen:     When ``True`` emit and ``exec`` a fully unrolled function
+                     body — no loop overhead on the hot path, unlimited arity.
+                     When ``False`` (default) use a plain loop — zero compile
+                     overhead, easier to debug, picklable.
+
     Codegen notes:
         Tracebacks show ``<dict_validator_n={n}_{strategy}>`` as the filename.
         exec-produced functions are not picklable.
     """
     n = len(field_specs)
- 
+
     if n == 0:
         return lambda data: isinstance(data, dict)
- 
+
     all_required = not any(nullable for _, _, nullable in field_specs)
+    # Strip the nullable flag for the all_required loop path — safe because
+    # nullability is already encoded inside each check callable itself.
     items: tuple[tuple[str, Callable[[Any], bool]], ...] = tuple(
         (f, c) for f, c, _ in field_specs
     )
- 
+
     if not codegen:
         # --- loop path ---------------------------------------------------
         if all_required:
@@ -940,24 +938,34 @@ def _make_dict_callable(
                 return True
             return fn_required
         else:
-            def fn_nullable(data: Any) -> bool:
+            # Per-field dispatch: required fields use data[f] so a missing
+            # required key is caught as KeyError, not silently passed as None.
+            _specs = tuple(field_specs)
+            def fn_mixed(data: Any) -> bool:
                 if not isinstance(data, dict): return False
-                for f, c in items:
-                    if not c(data.get(f)): return False
+                for f, c, nullable in _specs:
+                    if nullable:
+                        if not c(data.get(f)): return False
+                    else:
+                        try:
+                            v = data[f]
+                        except KeyError:
+                            return False
+                        if not c(v): return False
                 return True
-            return fn_nullable
- 
+            return fn_mixed
+
     # --- codegen path ----------------------------------------------------
     # Namespace uses mangled names (_f0, _c0, …) to avoid collisions with
     # field names that happen to be valid Python identifiers.
     ns: dict[str, Any] = {}
-    for i, (f, c) in enumerate(items):
+    for i, (f, c, _) in enumerate(field_specs):
         ns[f"_f{i}"] = f
         ns[f"_c{i}"] = c
- 
+
     lines: list[str] = ["def _fn(data):"]
     lines.append("    if not isinstance(data, dict): return False")
- 
+
     if all_required:
         for i in range(n):
             lines.append(f"    try: _v{i} = data[_f{i}]")
@@ -968,15 +976,29 @@ def _make_dict_callable(
                 lines.append(f"    return _c{i}(_v{i})")
         strategy = "required"
     else:
-        check = " and ".join(f"_c{i}(data.get(_f{i}))" for i in range(n))
-        lines.append(f"    return {check}")
+        # Per-field dispatch: required fields use data[f] + KeyError guard;
+        # nullable fields use data.get(f) so missing == None.
+        for i, (_, _, nullable) in enumerate(field_specs):
+            is_last = i == n - 1
+            if nullable:
+                expr = f"_c{i}(data.get(_f{i}))"
+                if is_last:
+                    lines.append(f"    return {expr}")
+                else:
+                    lines.append(f"    if not {expr}: return False")
+            else:
+                lines.append(f"    try: _v{i} = data[_f{i}]")
+                lines.append(f"    except KeyError: return False")
+                if is_last:
+                    lines.append(f"    return _c{i}(_v{i})")
+                else:
+                    lines.append(f"    if not _c{i}(_v{i}): return False")
         strategy = "nullable"
- 
+
     code = compile("\n".join(lines), f"<dict_validator_n={n}_{strategy}>", "exec")
-    exec(code, ns)  # noqa: S102
+    exec(code, ns)  # noqa: S102  # NOSONAR: S5334 — interpolated values are integer loop indices only; field names and callables enter via ns, never as source text
     return ns["_fn"]  # type: ignore[return-value]
 
-# --- END GENERATED CODE: _make_dict_callable ---
 
 
 
@@ -984,7 +1006,7 @@ def _make_dict_callable(
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def validator(rule: str | dict, codegen=True) -> Callable[[Any], bool]:
+def validator(rule: str | dict, codegen=False) -> Callable[[Any], bool]:
     """Compile a pipe rule string or flat dict rule into a fast bool callable.
 
     The returned callable takes a single value and returns True if valid,
