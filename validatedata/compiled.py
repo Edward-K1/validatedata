@@ -849,33 +849,42 @@ def _make_callable(
 
 def _compile_dict_rule(
     rule: dict,
+    *,
+    codegen: bool = False,
 ) -> list[tuple[str, Callable[[Any], bool], bool]]:
-    """Compile a flat {field: pipe_rule_string} dict into compiled field specs.
+    """Compile a {field: rule} dict into compiled field specs.
+
+    Values may be pipe-rule strings or nested dicts (which are compiled
+    recursively, mirroring the shape of the data being validated).
 
     Returns a list of (field, check_callable, nullable) triples. The nullable
     flag is surfaced separately so _make_dict_callable can choose the fastest
     field-access strategy at build time rather than at every call.
 
-    Raises ValueError if any rule value is a dict or list (nested rules are
-    not supported in this pass — use validate_data instead).
+    Raises ValueError if any rule value is a list or a non-str/dict type.
     """
     for field, value in rule.items():
-        if isinstance(value, (dict, list)):
+        if isinstance(value, list):
             raise ValueError(
-                f"Nested rules are not supported in the fast path "
-                f"(field {field!r} has a {type(value).__name__} value). "
-                "Use validate_data for nested validation."
+                f"List rule values are not supported in the fast path "
+                f"(field {field!r} has a list value). "
+                "Use validate_data for list-of-rule validation."
             )
-        if not isinstance(value, str):
+        if not isinstance(value, (str, dict)):
             raise ValueError(
-                f"Rule values must be pipe-rule strings in the fast path "
+                f"Rule values must be pipe-rule strings or nested dicts "
                 f"(field {field!r} has type {type(value).__name__!r})."
             )
 
     result: list[tuple[str, Callable[[Any], bool], bool]] = []
-    for field, rule_str in rule.items():
-        transform, checks, nullable = _compile_pipe_rule(rule_str)
-        result.append((field, _make_callable(transform, checks, nullable), nullable))
+    for field, value in rule.items():
+        if isinstance(value, dict):
+            nested_specs = _compile_dict_rule(value, codegen=codegen)
+            nested_fn = _make_dict_callable(nested_specs, codegen=codegen)
+            result.append((field, nested_fn, False))
+        else:
+            transform, checks, nullable = _compile_pipe_rule(value)
+            result.append((field, _make_callable(transform, checks, nullable), nullable))
     return result
 
 
@@ -1006,7 +1015,7 @@ def _make_dict_callable(
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def validator(rule: str | dict, codegen=False) -> Callable[[Any], bool]:
+def validator(rule: str | dict, codegen=True) -> Callable[[Any], bool]:
     """Compile a pipe rule string or flat dict rule into a fast bool callable.
 
     The returned callable takes a single value and returns True if valid,
@@ -1035,6 +1044,17 @@ def validator(rule: str | dict, codegen=False) -> Callable[[Any], bool]:
         validate_user({'name': 'Alice', 'age': 30})   # True
         validate_user({'name': 'A'})                  # False — name too short
 
+        validate_order = validator({
+            'id': 'int',
+            'address': {
+                'street': 'str|min:3',
+                'city': 'str',
+                'zip': 'str|re:\\d{5}',
+            },
+        })
+        validate_order({'id': 1, 'address': {'street': '1 Main St', 'city': 'Springfield', 'zip': '12345'}})  # True
+        validate_order({'id': 1, 'address': {'street': 'X', 'city': 'Springfield', 'zip': '12345'}})          # False — street too short
+
     Raises:
         TypeError   if rule is not a str or dict
         TypeError   if a type token is not a recognised type
@@ -1056,7 +1076,7 @@ def validator(rule: str | dict, codegen=False) -> Callable[[Any], bool]:
         transform, checks, nullable = _compile_pipe_rule(rule)
         fn: Callable[[Any], bool] = _make_callable(transform, checks, nullable)
     else:
-        field_specs = _compile_dict_rule(rule)
+        field_specs = _compile_dict_rule(rule, codegen=codegen)
         fn = _make_dict_callable(field_specs, codegen=codegen)  # type: ignore[misc]
 
     _cache_set(cache_key, fn)

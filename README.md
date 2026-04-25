@@ -27,7 +27,7 @@ Validatedata gives you expressive, inline validation rules without defining mode
 
 When you only need a **boolean pass/fail** result (no error messages), use `validator()`. It compiles a rule into a callable that returns `True` or `False` with minimal overhead. Its faster than Pydantic v2 and msgspec on invalid data dicts.
 
-The performance advantage of the *validator* function on invalid data comes from early‑exit optimisations. Other libraries often have to validate everything and report errors.
+The performance advantage of the *validator* function on invalid data comes from early‑exit optimisations. 
 
 ```python
 from validatedata import validator
@@ -56,13 +56,14 @@ is_str_or_int_list = validator('list[str,int]')
 is_str_or_int_list(['a', 1, 'c'])   # True
 
 # If processing millions of records or wish to have the maximum performance
-# on dictionaries, add the parameter codegen=True
+# on dictionaries there's an extra parameter codegen which is true by default.
+# To disable it set codegen=False. To disable internal code generation optimisations
 # i.e 
-validate_user = validator({
-    'username': 'str|min:3|max:32',
-    'email':    'email',
-    'age':      'int|min:18'
-    }, codegen=True)
+# validate_user = validator({
+#     'username': 'str|min:3|max:32',
+#     'email':    'email',
+#     'age':      'int|min:18'
+#     }, codegen=False)
 
 validate_user({'username': 'bob', 'email': 'bob@example.com', 'age': 19})   # True
 
@@ -210,7 +211,7 @@ else:
 
 ## Mirror‑structure rules
 
-Instead of writing explicit {'type': 'dict', 'fields': {...}} for nested data, you can write a rule that mirrors the shape of your data. This is supported by validate_data, validate. The `validator` function only supports flat dicts in the current release
+Instead of writing explicit {'type': 'dict', 'fields': {...}} for nested data, you can write a rule that mirrors the shape of your data. This is supported by validator, validate_data and validate. 
 
 ```python
 from validatedata import validate_data
