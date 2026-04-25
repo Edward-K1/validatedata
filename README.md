@@ -55,14 +55,6 @@ is_str_list(['a', 1, 'c'])      # False
 is_str_or_int_list = validator('list[str,int]')
 is_str_or_int_list(['a', 1, 'c'])   # True
 
-# If you wish to disable internal code generation for performance optimisations, set codegen to False. It is true by default for max performance
-# i.e 
-# validate_user = validator({
-#     'username': 'str|min:3|max:32',
-#     'email':    'email',
-#     'age':      'int|min:18'
-#     }, codegen=False)
-
 
 # Nested dicts. Mirror structure
 v = validator({
@@ -1011,6 +1003,7 @@ if not result.ok:
 - Nested data (`fields`, `items`) automatically switches error format to path-prefixed strings
 - The current version does not support `depends_on` across nested levels
 - `transform` runs before type checking, so the transformed value is what gets validated
+- If you need to disable performance optimisations added by code generation on validator, set codegen to False. e.g `is_valid = validator(..., codegen=False)` It will still be fast but you'll not some slight performance hit when procession millions of dicts
 
 ---
 
