@@ -55,9 +55,7 @@ is_str_list(['a', 1, 'c'])      # False
 is_str_or_int_list = validator('list[str,int]')
 is_str_or_int_list(['a', 1, 'c'])   # True
 
-# If processing millions of records or wish to have the maximum performance
-# on dictionaries there's an extra parameter codegen which is true by default.
-# To disable it set codegen=False. To disable internal code generation optimisations
+# If you wish to disable internal code generation for performance optimisations, set codegen to False. It is true by default for max performance
 # i.e 
 # validate_user = validator({
 #     'username': 'str|min:3|max:32',
@@ -65,7 +63,18 @@ is_str_or_int_list(['a', 1, 'c'])   # True
 #     'age':      'int|min:18'
 #     }, codegen=False)
 
-validate_user({'username': 'bob', 'email': 'bob@example.com', 'age': 19})   # True
+
+# Nested dicts. Mirror structure
+v = validator({
+    'owner': 'str|min:2',
+    'address': {'street': 'str', 'city': 'str'},
+})
+
+v({
+    'owner': 'Alice',
+    'address': {'street': '1 Main St', 'city': 'Springfield'},
+})
+
 
 ```
 
