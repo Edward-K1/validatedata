@@ -548,9 +548,10 @@ class TestDictRules(unittest.TestCase):
         self.assertFalse(v('not a dict'))
         self.assertFalse(v(None))
 
-    def test_nested_dict_value_raises(self):
-        with self.assertRaises(ValueError):
-            validator({'user': {'name': 'str'}})
+    def test_nested_dict_value_compiles(self):
+        # Nested dict rules are now supported in the fast path.
+        v = validator({'user': {'name': 'str'}})
+        self.assertTrue(v({'user': {'name': 'Alice'}}))
 
     def test_nested_list_value_raises(self):
         with self.assertRaises(ValueError):
