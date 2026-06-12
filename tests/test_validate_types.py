@@ -76,7 +76,7 @@ class TestValidateTypesFixed(unittest.TestCase):
 
     def test_union_type_int_or_str(self):
         @validate_types
-        def handle(value: int | str) -> str:
+        def handle(value: Union[int,str]) -> str:
             return f"got {value}"
 
         self.assertEqual(handle(42), "got 42")
