@@ -1055,6 +1055,14 @@ def validate_object_engine(
 # and size() for monitoring.
 # ---------------------------------------------------------------------------
 
+# engine.py – add near other global caches
+_extra_clear_callbacks = []
+
+def register_cache_clear_callback(callback):
+    """Register a function to be called when cache.clear() is invoked."""
+    _extra_clear_callbacks.append(callback)
+    
+    
 class _CacheNamespace:
     """Thin handle for the module-level rule caches.
 
@@ -1076,6 +1084,9 @@ class _CacheNamespace:
         # are fully initialised by the time any caller reaches this point.
         from .compiled import _COMPILED_CACHE
         _COMPILED_CACHE.clear()
+        
+        for cb in _extra_clear_callbacks:
+            cb()
 
     def size(self) -> dict[str, int]:
         """Return the number of entries in each cache."""

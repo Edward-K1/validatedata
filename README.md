@@ -12,7 +12,10 @@ An easier way to validate data in python.
 
 Validatedata gives you expressive, inline validation rules without defining model classes. It fits naturally into any Python workflow – from lightweight scripts to high‑volume data processing.
 
-**New in v0.5:** The `validator()` fast path for dramatic performance gains (see benchmarks below).
+**New in v0.5:** 
+- The `validator()` fast path for dramatic performance gains (see benchmarks below).
+- Automatic validation using `autovalidate` and `autovalidate_package`
+
 
 ### Benchmarks (1 million repetitions)
 | Test | validatedata | manual | pydantic v2 | msgspec | beartype | fastjsonschema |
@@ -45,7 +48,6 @@ validate_user = validator({
 })
 
 validate_user({'username': 'bob', 'email': 'bob@example.com', 'age': 25})   # True
-validate_user({'username': 'bob', 'email': 'bob@example.com', 'age': 15})   # False
 
 # Parameterized containers
 is_str_list = validator('list[str]')
