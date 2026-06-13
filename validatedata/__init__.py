@@ -2,6 +2,7 @@ from .validatedata import validate, validate_data, validate_types, ValidationRes
 from .engine import ValidationError, cache
 from .compiled import validator
 from .autovalidate import autovalidate
+from .autovalidate_package import autovalidate_package
 # from .fast import validate_data_fast
 
 __version__ = '0.5.2'
@@ -17,5 +18,6 @@ __all__ = [
     'cache',
     'validator',
     'autovalidate',
+    'autovalidate_package'
     # 'validate_data_fast'
 ]

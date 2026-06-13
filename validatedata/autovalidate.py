@@ -1,11 +1,9 @@
 import inspect
 import re
 import sys
-from types import FunctionType
 from typing import Any, Callable, Dict, List, Optional, Pattern, Union
 
 from validatedata import validate_types
-
 
 def autovalidate(
     module: Union[object, str, None] = None,
@@ -97,10 +95,20 @@ def autovalidate(
         if _is_already_decorated(obj):
             return obj, None
 
+        # Merge provided type_checkers with registered checkers from validatedata.types
+        merged_checkers = dict(type_checkers or {})
+        try:
+            from validatedata.types import export_registered_checkers
+            merged_checkers.update(export_registered_checkers())
+        except Exception:
+            # fallback to provided checkers only
+            pass
+        
         decorator = validate_types(
             raise_exceptions=raise_exceptions,
-            type_checkers=type_checkers,
+            type_checkers=merged_checkers,
         )
+
 
         decorated = decorator(obj)
 

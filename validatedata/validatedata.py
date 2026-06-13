@@ -107,15 +107,6 @@ VALID_RULE_KEYS: frozenset[str] = frozenset(
     }
 )
 
-_TYPE_REGISTRY: Dict[str, Callable[[Any], bool]] = {}
-
-def register_type(name: str, checker: Callable[[Any], bool]) -> None:
-    _TYPE_REGISTRY[name] = checker
-
-def unregister_type(name: str) -> None:
-    _TYPE_REGISTRY.pop(name, None)
-
-
 def _check_rule_dict(rule: dict[str, Any], path: str = "") -> None:
     """Raise ValueError for any unrecognised key in a rule dict.
 

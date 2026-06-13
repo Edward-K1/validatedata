@@ -120,7 +120,7 @@ else:
 
 ---
 
-## Four Ways to Validate
+## Five Ways to Validate
 
 ## 1. validator (for high performance)
  ```python
@@ -132,10 +132,9 @@ else:
  
  ```
 
-
 ### 2. validate_types decorator
 
-Validates function arguments against their Python type annotations. Works with or without brackets.
+Validates function arguments against their Python type annotations.
 
 ```python
 from validatedata import validate_types
@@ -217,6 +216,43 @@ else:
 ```
 
 >The keys format is for when you need to add top level config options in a future release
+
+### 5. Automatic validation
+Yes, you read that right.
+```python
+
+from decimal import Decimal
+from validatedata import autovalidate
+
+# custom type checker for decimals
+def is_decimal(v): return isinstance(v, Decimal)
+
+
+# add at the bottom of a file you want to auto-validate
+# replace placeholder details
+autovalidate(
+    module="my_project.my_module",
+    type_checkers={Decimal: is_decimal},
+    raise_exceptions=True,
+)
+```
+
+You can also auto-validate an entire package. Add the code below to the root package *__init__.py* and watch magic
+
+```python
+from validatedata import autovalidate_package
+
+report = autovalidate_package(
+    package="my_project",
+    include=[ "my_project.*" ],   # only modules under my_project
+    exclude=[ "my_project.tests.*" ],  # skip tests
+    # dry_run=True,
+)
+
+# Uncomment dry_run=True plus the print below to see what would be auto-validated.
+# print(report["decorated"])
+
+```
 
 ## Mirror‑structure rules
 
