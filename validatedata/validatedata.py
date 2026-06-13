@@ -593,6 +593,17 @@ def validate_types(
             _globals = getattr(f, "__globals__", {})
             _locals = dict(vars(_typing))  # Inject typing module to resolve local imports
             
+            # Polyfill for built-in generics (PEP 585) in Python < 3.9
+            if sys.version_info < (3, 9):
+                _locals.update({
+                    "dict": _typing.Dict,
+                    "list": _typing.List,
+                    "tuple": _typing.Tuple,
+                    "set": _typing.Set,
+                    "frozenset": _typing.FrozenSet,
+                    "type": _typing.Type,
+                })
+
             # Python < 3.9 compatibility for include_extras
             if sys.version_info >= (3, 9):
                 type_hints = get_type_hints(
