@@ -11,6 +11,7 @@ Tests cover:
 - Return type annotation ignored
 - `raise_exceptions=False` behaviour
 """
+from __future__ import annotations
 
 import sys
 import unittest

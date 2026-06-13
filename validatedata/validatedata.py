@@ -7,7 +7,7 @@ import types
 from collections import OrderedDict
 from functools import wraps
 from inspect import getfullargspec, iscoroutinefunction
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, get_type_hints
 
 from .engine import (
     MAX_NESTING_DEPTH,
@@ -419,7 +419,6 @@ def _check_generic_container(
         errors.append(f"Unsupported annotation at '{path}': {origin}")
         return False
 
-
 def _check_type(
     value: Any, annot: Any, checkers: Dict[Any, Callable], path: str, errors: list
 ) -> bool:
@@ -450,20 +449,49 @@ def _check_type(
             errors.append(f"Checker error for '{path}': {e}")
             return False
 
+    # Helper: robust origin/args extraction supporting various typing internals
+    def _resolve_origin_and_args(a):
+        origin = None
+        args = ()
+        try:
+            origin = get_origin(a)
+        except Exception:
+            origin = None
+        if origin is None:
+            origin = getattr(a, "__origin__", None)
+        # Some typing objects expose a _name like 'List' etc.
+        if origin is None:
+            _name = getattr(a, "_name", None)
+            if _name in {"List", "Dict", "Tuple", "Set", "FrozenSet", "Sequence"}:
+                mapping = {
+                    "List": list,
+                    "Dict": dict,
+                    "Tuple": tuple,
+                    "Set": set,
+                    "FrozenSet": frozenset,
+                    "Sequence": list,
+                }
+                origin = mapping.get(_name, None)
+        # args fallback
+        try:
+            args = get_args(a)
+        except Exception:
+            args = getattr(a, "__args__", ())
+        if args is None:
+            args = ()
+        return origin, args
+
     # 2. Union / Optional
-    origin = get_origin(annot)
+    origin, args = _resolve_origin_and_args(annot)
+
     # Handle both typing.Union and PEP 604 union (types.UnionType)
     is_pep604_union = hasattr(types, "UnionType") and origin is types.UnionType
     if origin is Union or is_pep604_union:
-        args = get_args(annot)
         # try each option; collect no error unless all fail
-        sub_errors_snapshot = list(errors)
         for arg in args:
-            # try without mutating errors permanently
             temp_errors = []
             if _check_type(value, arg, checkers, path, temp_errors):
                 return True
-        # none matched: append a combined message
         expected = " or ".join(_format_expected(a) for a in args)
         errors.append(
             f"Expected type {expected} for '{path}', got {type(value).__name__}"
@@ -472,7 +500,6 @@ def _check_type(
 
     # 3. Generics
     if origin is not None:
-        args = get_args(annot)
         # prefer origin-level checker
         if origin in checkers:
             try:
@@ -489,19 +516,16 @@ def _check_type(
 
     # 4. Fallback isinstance
     # Only call isinstance when annot is a real class/type (not a typing object)
-    origin = get_origin(annot)
-    if origin is None:
-        # annot is not a generic typing object; safe to try isinstance
-        try:
-            if isinstance(value, annot):
-                return True
-            errors.append(
-                f"Expected type {_format_expected(annot)} for '{path}', got {type(value).__name__}"
-            )
-            return False
-        except TypeError:
-            # annot is not usable with isinstance (e.g., ForwardRef or other unsupported)
-            pass
+    try:
+        if isinstance(value, annot):
+            return True
+        errors.append(
+            f"Expected type {_format_expected(annot)} for '{path}', got {type(value).__name__}"
+        )
+        return False
+    except TypeError:
+        # annot is not usable with isinstance (e.g., ForwardRef or other unsupported)
+        pass
 
     # fallback to name-based checker or unsupported annotation
     name = getattr(annot, "__name__", None) or str(annot)
@@ -519,7 +543,6 @@ def _check_type(
 
     errors.append(f"Unsupported annotation for '{path}': {annot}")
     return False
-
 
 
 def validate_types(
@@ -563,17 +586,37 @@ def validate_types(
         # --- Extract signature and pre‑compile checks once ---
         sig = inspect.signature(f)
         parameters = list(sig.parameters.values())
-
+        
+        # Resolve annotations (handles postponed string annotations and forward refs)
+        try:
+            import typing as _typing
+            _globals = getattr(f, "__globals__", {})
+            _locals = dict(vars(_typing))  # Inject typing module to resolve local imports
+            
+            # Python < 3.9 compatibility for include_extras
+            if sys.version_info >= (3, 9):
+                type_hints = get_type_hints(
+                    f, globalns=_globals, localns=_locals, include_extras=True
+                )
+            else:
+                type_hints = get_type_hints(
+                    f, globalns=_globals, localns=_locals
+                )
+        except Exception:
+            # If resolution fails, fall back to raw annotations
+            type_hints = {}
+        
         # Pre‑compile list of (param_name, annotation, has_default)
         checks = []
         for param in parameters:
             if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
-                # *args or **kwargs – skip type checking
                 continue
-            if param.annotation is param.empty:
+            # Prefer resolved hint; fall back to raw annotation
+            annot = type_hints.get(param.name, param.annotation)
+            if annot is param.empty:
                 continue
             has_default = param.default is not param.empty
-            checks.append((param.name, param.annotation, has_default))
+            checks.append((param.name, annot, has_default))
             
         def _none_allowed(annot) -> bool:
             # Accept None only when annotation explicitly allows it
