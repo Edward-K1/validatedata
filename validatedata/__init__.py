@@ -18,6 +18,6 @@ __all__ = [
     'cache',
     'validator',
     'autovalidate',
-    'autovalidate_package'
+    'autovalidate_package',
     'validate_data_fast'
 ]
