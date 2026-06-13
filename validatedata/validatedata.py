@@ -488,29 +488,38 @@ def _check_type(
         return _check_generic_container(value, origin, args, checkers, path, errors)
 
     # 4. Fallback isinstance
-    try:
-        if isinstance(value, annot):
-            return True
-        errors.append(
-            f"Expected type {_format_expected(annot)} for '{path}', got {type(value).__name__}"
-        )
-        return False
-    except TypeError:
-        # fallback to name-based checker
-        name = getattr(annot, "__name__", None) or str(annot)
-        if name in checkers:
-            try:
-                ok = bool(checkers[name](value))
-                if not ok:
-                    errors.append(
-                        f"Custom checker '{name}' failed for '{path}', got {type(value).__name__}"
-                    )
-                return ok
-            except Exception as e:
-                errors.append(f"Checker error for '{path}': {e}")
-                return False
-        errors.append(f"Unsupported annotation for '{path}': {annot}")
-        return False
+    # Only call isinstance when annot is a real class/type (not a typing object)
+    origin = get_origin(annot)
+    if origin is None:
+        # annot is not a generic typing object; safe to try isinstance
+        try:
+            if isinstance(value, annot):
+                return True
+            errors.append(
+                f"Expected type {_format_expected(annot)} for '{path}', got {type(value).__name__}"
+            )
+            return False
+        except TypeError:
+            # annot is not usable with isinstance (e.g., ForwardRef or other unsupported)
+            pass
+
+    # fallback to name-based checker or unsupported annotation
+    name = getattr(annot, "__name__", None) or str(annot)
+    if name in checkers:
+        try:
+            ok = bool(checkers[name](value))
+            if not ok:
+                errors.append(
+                    f"Custom checker '{name}' failed for '{path}', got {type(value).__name__}"
+                )
+            return ok
+        except Exception as e:
+            errors.append(f"Checker error for '{path}': {e}")
+            return False
+
+    errors.append(f"Unsupported annotation for '{path}': {annot}")
+    return False
+
 
 
 def validate_types(
@@ -565,13 +574,28 @@ def validate_types(
                 continue
             has_default = param.default is not param.empty
             checks.append((param.name, param.annotation, has_default))
+            
+        def _none_allowed(annot) -> bool:
+            # Accept None only when annotation explicitly allows it
+            if annot is None:
+                return True
+            if annot is type(None):
+                return True
+            origin = get_origin(annot)
+            if origin is Union:
+                args = get_args(annot)
+                return any(a is type(None) for a in args)
+            # PEP 604 union (X | None) handled by get_origin/get_args above
+            return False
 
         def check_types(bound_args: dict) -> list[str]:
             errors = []
             for name, annot, has_default in checks:
                 val = bound_args.get(name)
-                if val is None and has_default:
-                    continue
+                if val is None:
+                    # allow None only if annotation explicitly permits it
+                    if _none_allowed(annot):
+                        continue
                 # start path at parameter name
                 _check_type(val, annot, _checkers, name, errors)
             return errors

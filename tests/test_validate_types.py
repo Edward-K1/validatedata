@@ -227,6 +227,35 @@ class TestValidateTypesFixed(unittest.TestCase):
         self.assertEqual(Calc.power(2, 3), 8)
         with self.assertRaises(ValidationError):
             Calc.power(2, "three")
+            
+    def test_list_of_ints_parameterized(self):
+        @validate_types
+        def f(xs: list[int]) -> int:
+            return sum(xs)
+    
+        self.assertEqual(f([1, 2, 3]), 6)
+        with self.assertRaises(ValidationError):
+            f([1, "two", 3])
+    
+    def test_typing_list_parameterized(self):
+        from typing import List
+        @validate_types
+        def g(xs: List[int]) -> int:
+            return sum(xs)
+    
+        self.assertEqual(g([4, 5]), 9)
+        with self.assertRaises(ValidationError):
+            g(["a", "b"])
+    
+    def test_dict_parameterized(self):
+        @validate_types
+        def h(m: dict[str, int]) -> int:
+            return sum(m.values())
+    
+        self.assertEqual(h({"a": 1, "b": 2}), 3)
+        with self.assertRaises(ValidationError):
+            h({"a": "one"})
+
 
 
 # ---------------------------------------------------------------------------
