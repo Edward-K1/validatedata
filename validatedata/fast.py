@@ -46,6 +46,24 @@ _TYPE_TO_MESSAGE = {
     "odd": "not_odd", "prime": "not_prime",
 }
 
+# OPT 1: Module-level constants — avoids re-creating frozensets on every call.
+_NATIVE_NAMES = frozenset({'str', 'int', 'float', 'bool', 'list', 'tuple', 'set', 'dict'})
+_COLLECTION_TYPES = frozenset({'list', 'tuple', 'set', 'dict'})
+
+# OPT 2: Flat lookup table for min/max/between message keys — eliminates
+# cascading if/elif branches inside the hot error-message path.
+_RANGE_MSG_KEYS: Dict[Tuple[str, str], str] = {
+    ("between", "collection"): "collection_not_in_range",
+    ("between", "len"):        "string_not_in_range",
+    ("between", "number"):     "number_not_in_range",
+    ("min",     "collection"): "collection_too_few",
+    ("min",     "len"):        "string_too_short",
+    ("min",     "number"):     "number_too_small",
+    ("max",     "collection"): "collection_too_many",
+    ("max",     "len"):        "string_too_long",
+    ("max",     "number"):     "number_too_large",
+}
+
 # ----------------------------------------------------------------------
 # Structure for a compiled rule (stores fast validator + per‑check metadata)
 # ----------------------------------------------------------------------
@@ -90,7 +108,7 @@ def _compile_pipe_rule_to_struct(rule_str: str) -> _CompiledRule:
     # Normalise parameterized types: "list[str]" → "list", "tuple[int,str]" → "tuple"
     type_name = _raw_type.split("[", 1)[0]
 
-    _NATIVE_NAMES = frozenset({'str', 'int', 'float', 'bool', 'list', 'tuple', 'set', 'dict'})
+    # OPT 1: Use module-level _NATIVE_NAMES instead of creating a new frozenset here.
     validator_names = []
     validator_args = []
     custom_msg: Optional[str] = None
@@ -138,12 +156,14 @@ def _message_for_check_at_index(
     type_name: str,
     rule_struct: _CompiledRule,
 ) -> str:
-    
+
     if rule_struct.custom_msg:
         return rule_struct.custom_msg
-        
-    validator_name = rule_struct.validator_names[idx] if idx < len(rule_struct.validator_names) else "unknown"
-    arg = rule_struct.validator_args[idx] if idx < len(rule_struct.validator_args) else None
+
+    validator_names = rule_struct.validator_names
+    validator_args  = rule_struct.validator_args
+    validator_name  = validator_names[idx] if idx < len(validator_names) else "unknown"
+    arg             = validator_args[idx]  if idx < len(validator_args)  else None
 
     if validator_name == "type":
         if rule_struct.non_strict:
@@ -157,36 +177,16 @@ def _message_for_check_at_index(
             template = template.replace("{actual}", type(value).__name__)
         return template
 
-    # For min/max/between, pick directional message and interpolate bound.
+    # OPT 2: Flat lookup replaces cascading if/elif for min/max/between.
     if validator_name in ("min", "max", "between"):
-        _COLLECTION_TYPES = frozenset({'list', 'tuple', 'set', 'dict'})
-        is_collection = type_name in _COLLECTION_TYPES
-        is_len = type_name in compiled._LEN_TYPES  # includes str, email, url, etc.
-
-        if validator_name == "between":
-            if is_collection:
-                msg_key = "collection_not_in_range"
-            elif is_len:
-                msg_key = "string_not_in_range"
-            else:
-                msg_key = "number_not_in_range"
-            return _msg.get(msg_key, "value out of range")
-
-        if validator_name == "min":
-            if is_collection:
-                msg_key = "collection_too_few"
-            elif is_len:
-                msg_key = "string_too_short"
-            else:
-                msg_key = "number_too_small"
-        else:  # max
-            if is_collection:
-                msg_key = "collection_too_many"
-            elif is_len:
-                msg_key = "string_too_long"
-            else:
-                msg_key = "number_too_large"
-
+        # OPT 1: Use module-level _COLLECTION_TYPES instead of a local frozenset.
+        if type_name in _COLLECTION_TYPES:
+            category = "collection"
+        elif type_name in compiled._LEN_TYPES:
+            category = "len"
+        else:
+            category = "number"
+        msg_key  = _RANGE_MSG_KEYS[(validator_name, category)]
         template = _msg.get(msg_key, "value out of range")
         if arg:
             template = template.replace("{min}", arg).replace("{max}", arg)
@@ -226,11 +226,15 @@ def _validate_value_with_messages(
             return True, []
         return False, [f"{field_name}: value is missing" if field_name else "value is missing"]
 
+    # OPT 4: Bind frequently accessed slot attributes to locals before the loop.
+    checks     = rule_struct.checks
+    type_name  = rule_struct.type_name
+
     errors = []
-    for i, check in enumerate(rule_struct.checks):
+    for i, check in enumerate(checks):
         try:
             if not check(transformed):
-                msg = _message_for_check_at_index(i, transformed, rule_struct.type_name, rule_struct)
+                msg = _message_for_check_at_index(i, transformed, type_name, rule_struct)
                 if field_name:
                     msg = f"{field_name}: {msg}"
                 errors.append(msg)
@@ -321,29 +325,48 @@ def _validate_mapping_with_messages(
         return True, [], data if mutate else None
 
     errors = []
-    transformed = {} if mutate else None
-    for field, cr in field_rules.items():
-        value = data.get(field)
-        if isinstance(cr, _CompiledRule):
-            ok, errs = _validate_value_with_messages(value, cr, field)
-            if not ok:
-                errors.extend(errs)
-            if mutate and ok:
-                transformed[field] = value
-        elif isinstance(cr, tuple):  # nested dict
-            nested_fast, nested_field_rules = cr
-            if not isinstance(value, dict):
-                errors.append(f"{field}: expected dict, got {type(value).__name__}")
-                continue
-            nested_ok, nested_errs, nested_transformed = _validate_mapping_with_messages(value, rule[field], mutate)
-            if not nested_ok:
-                for e in nested_errs:
-                    errors.append(f"{field}.{e}")
-            if mutate and nested_ok:
-                transformed[field] = nested_transformed
-        else:
-            errors.append(f"{field}: internal error")
-    return len(errors) == 0, errors, transformed if mutate else None
+
+    # OPT 3: Split mutate / non-mutate into separate loops so the per-field
+    # `if mutate` branches disappear entirely from the common (non-mutate) path.
+    if mutate:
+        transformed: dict = {}
+        for field, cr in field_rules.items():
+            value = data.get(field)
+            if isinstance(cr, _CompiledRule):
+                ok, errs = _validate_value_with_messages(value, cr, field)
+                if not ok:
+                    errors.extend(errs)
+                else:
+                    transformed[field] = value
+            elif isinstance(cr, tuple):  # nested dict
+                if not isinstance(value, dict):
+                    errors.append(f"{field}: expected dict, got {type(value).__name__}")
+                    continue
+                nested_ok, nested_errs, nested_transformed = _validate_mapping_with_messages(value, rule[field], mutate=True)
+                if not nested_ok:
+                    errors.extend(f"{field}.{e}" for e in nested_errs)
+                else:
+                    transformed[field] = nested_transformed
+            else:
+                errors.append(f"{field}: internal error")
+        return len(errors) == 0, errors, transformed
+    else:
+        for field, cr in field_rules.items():
+            value = data.get(field)
+            if isinstance(cr, _CompiledRule):
+                ok, errs = _validate_value_with_messages(value, cr, field)
+                if not ok:
+                    errors.extend(errs)
+            elif isinstance(cr, tuple):  # nested dict
+                if not isinstance(value, dict):
+                    errors.append(f"{field}: expected dict, got {type(value).__name__}")
+                    continue
+                nested_ok, nested_errs, _ = _validate_mapping_with_messages(value, rule[field], mutate=False)
+                if not nested_ok:
+                    errors.extend(f"{field}.{e}" for e in nested_errs)
+            else:
+                errors.append(f"{field}: internal error")
+        return len(errors) == 0, errors, None
 
 # ----------------------------------------------------------------------
 # Public API
@@ -383,7 +406,7 @@ def validate_data_fast(
 # ----------------------------------------------------------------------
 # ValidationResult
 # ----------------------------------------------------------------------
-# 
+#
 # Todo: Consider importing class exposed in __init__.py
 class ValidationResult:
     __slots__ = ("ok", "errors", "data")
@@ -391,6 +414,10 @@ class ValidationResult:
         self.ok = ok
         self.errors = errors
         self.data = data
+
+    # OPT 6: __bool__ lets callers write `if result:` instead of `if result.ok:`
+    # with no attribute lookup overhead.
+    __bool__ = lambda self: self.ok
 
 # ----------------------------------------------------------------------
 # Cache management (extends engine.cache)
