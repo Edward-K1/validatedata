@@ -65,6 +65,53 @@ Use ``dict`` and ``list`` with ``fields`` and ``items`` for nested validation
 
 ----
 
+Custom types
+------------
+
+You can register your own type checkers for any Python class or string name.
+This is especially useful for domain‑specific types (e.g. ``Decimal``,
+``Point``, or even custom classes).
+
+Registering a type
+~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   from validatedata import register_type, validate_data
+
+   def is_decimal(v):
+       from decimal import Decimal
+       return isinstance(v, Decimal)
+
+   register_type(Decimal, is_decimal)
+
+   rule = {'price': 'decimal|min:0'}   # use the class name as type
+
+   result = validate_data({'price': Decimal('19.99')}, rule)
+   result.ok  # True
+
+You can also register a checker under a custom name:
+
+.. code-block:: python
+
+   register_type('positive_int', lambda v: isinstance(v, int) and v > 0)
+
+   rule = {'count': 'positive_int'}
+   validate_data({'count': 5}, rule).ok   # True
+
+Unregistering and introspection
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   from validatedata import unregister_type, export_registered_checkers
+
+   unregister_type(Decimal)               # remove by class
+   unregister_type('positive_int')        # remove by name
+
+   checkers = export_registered_checkers()   # dict of {name: checker}
+
+
 Dict rule form
 --------------
 
@@ -154,6 +201,23 @@ Valid rule keys
      - Override the error for a specific rule e.g. ``range-message``, ``expression-message``
 
 ----
+
+Checking a rule dict before use
+-------------------------------
+
+Use :func:`check_rule` to validate a rule dict in isolation – it raises
+``ValueError`` for unrecognised keys.
+
+.. code-block:: python
+
+   from validatedata import check_rule, VALID_RULE_KEYS
+
+   check_rule({'type': 'str', 'nullable': True})   # OK
+   check_rule({'type': 'str', 'nulable': True})    # ValueError
+
+   print(VALID_RULE_KEYS)   # frozenset of all allowed keys
+
+This is useful when building rules programmatically.
 
 Shorthand rule strings
 ----------------------

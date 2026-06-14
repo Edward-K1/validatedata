@@ -4,17 +4,21 @@
 
 An easier way to validate data in python.
 
-**Two validation modes, one simple syntax.**
+**Six validation modes – one simple syntax.**
 
-- **High‑performance mode** – use `validator()` to compile rules into fast boolean callables. Ideal for data streams, and anywhere you need maximum throughput.  
-
-- **General‑purpose mode** – use `validate_data` or decorators (`@validate`, `@validate_types`) to get detailed error messages, nested validation, and optional mutation. Perfect for light APIs, CLI tools, scripts, and forms.
+1. **`validator()`** – compile rules into ultra‑fast boolean callables. Ideal for high‑throughput streaming.
+2. **`validate_data_fast()`** – compiled speed with **full error messages** (preview of the next‑gen engine – will eventually replace `validate_data`).
+3. **`validate_data()`** – general‑purpose validation with detailed errors, nested structures, and optional mutation.
+4. **`@validate`** – decorator for function argument validation.
+5. **`@validate_types`** – decorator that uses Python type annotations.
+6. **`autovalidate` / `autovalidate_package`** – automatically apply `@validate_types` to entire modules or packages.
 
 Validatedata gives you expressive, inline validation rules without defining model classes. It fits naturally into any Python workflow – from lightweight scripts to high‑volume data processing.
 
-**New in v0.5:** 
-- The `validator()` fast path for dramatic performance gains (see benchmarks below).
-- Automatic validation using `autovalidate` and `autovalidate_package`
+**New in v0.6.0:** 
+- **`validate_data_fast`** – the speed of `validator()` combined with rich error messages (experimental fast path, will eventually replace `validate_data`).
+- **`autovalidate` & `autovalidate_package`** – automatic application of `@validate_types` to whole modules or packages.
+- **Custom type registration** – add your own type checkers with `register_type` / `unregister_type`.
 
 
 ### Benchmarks (1 million repetitions)
@@ -24,6 +28,8 @@ Validatedata gives you expressive, inline validation rules without defining mode
 | Scalar: type + range | 0.1508s | 0.1286s | 0.1314s | 0.1353s | 0.3841s | 0.1493s |
 | Dict  (valid) | 1.9438s | 1.1996s | 1.8246s | 1.2350s | 3.8948s | 2.8658s |
 | Dict (invalid) | 0.2644s | 0.5856s | 2.1661s | 1.1895s | 2.0818s | 2.7938s |
+
+> **Note:** The “manual” column represents hand‑written `if` statements + dataclasses – fastest but not reusable. Validatedata’s small overhead buys you maintainability and expressiveness.
 
 
 ## Fast validation with `validator()`
@@ -114,9 +120,9 @@ else:
 
 ---
 
-## Five Ways to Validate
+## Six Ways to Validate
 
-## 1. validator (for high performance)
+## 1. `validator()` – for high performance (boolean only)
  ```python
  from validatedata import validator
  
@@ -125,8 +131,18 @@ else:
      do_xyz()
  
  ```
+ ### 2. compiled speed + error messages (experimental)
 
-### 2. validate_types decorator
+ ```python
+ from validatedata import validate_data_fast
+ 
+ result = validate_data_fast({'name': 'alice'}, {'name': 'str|min:3'})
+ if not result.ok:
+     print(result.errors)   # ['name: string too short (minimum length: 3)']
+```
+
+
+### 3. validate_types decorator
 
 Validates function arguments against their Python type annotations.
 
@@ -149,7 +165,7 @@ result = create_user('alice', 'thirty')
 # returns {'errors': [...]} instead of raising
 ```
 
-### 3. validate decorator
+### 4. validate decorator
 
 ```python
 from validatedata import validate
@@ -191,7 +207,7 @@ class User:
         return f'{firstname} {lastname}'
 ```
 
-### 4. validate_data function
+### 5. validate_data function
 
 ```python
 from validatedata import validate_data
@@ -211,8 +227,8 @@ else:
 
 >The keys format is for when you need to add top level config options in a future release
 
-### 5. Automatic validation
-Yes, you read that right.
+### 6. Automatic validation
+Yes, that's right.
 ```python
 
 from decimal import Decimal
@@ -275,6 +291,32 @@ result = validate_data(data, rule)
 print(result.ok)   # True
 ```
 ---
+
+## Custom type registration
+You can register your own type checkers for any Python class or string name.
+```python
+from validatedata import register_type, validate_data
+
+def is_decimal(v):
+    from decimal import Decimal
+    return isinstance(v, Decimal)
+
+register_type(Decimal, is_decimal)
+
+rule = {'price': 'decimal|min:0'}   # use the class name as type
+result = validate_data({'price': Decimal('19.99')}, rule)
+result.ok  # True
+```
+Introspection and removal:
+
+```python
+from validatedata import unregister_type, export_registered_checkers
+
+unregister_type(Decimal)                     # remove by class
+unregister_type('positive_int')              # remove by name
+
+checkers = export_registered_checkers()      # dict of {name: checker}
+```
 
 ## Parameters
 
@@ -393,11 +435,11 @@ rules = [{
 
 ## Shorthand Rule Strings
 
-Rules can be expressed as compact strings instead of dicts. There are two syntaxes: the original **colon syntax** for simple cases, and the newer **pipe syntax** for anything more expressive. Both work side by side in the same rule list.
+Rules can be expressed as compact strings instead of dicts. There are two syntaxes: the original **colon syntax** (deprecated) for simple cases, and the newer **pipe syntax** for anything more expressive.
 
 ---
 
-### Colon syntax (original)
+### Colon syntax (deprecated)
 
 ```python
 'str'                                    # string

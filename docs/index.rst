@@ -11,15 +11,23 @@ validatedata
 
 An easier way to validate data in python.
 
-**Two validation modes, one simple syntax.**
+**Six validation modes – one simple syntax.**
 
-- **High‑performance mode** – use `validator()` to compile rules into fast boolean callables. Ideal for data streams, and anywhere you need maximum throughput.  
-
-- **General‑purpose mode** – use `validate_data` or decorators (`@validate`, `@validate_types`) to get detailed error messages, nested validation, and optional mutation. Perfect for light APIs, CLI tools, scripts, and forms.
+1. **`validator()`** – compile rules into ultra‑fast boolean callables. Ideal for high‑throughput streaming.
+2. **`validate_data_fast()`** – same compiled speed but with **full error messages** (preview of the next‑gen engine).
+3. **`validate_data()`** – general‑purpose validation with detailed errors, nested structures, and optional mutation.
+4. **`@validate`** – decorator for function argument validation.
+5. **`@validate_types`** – decorator that uses Python type annotations.
+6. **`autovalidate` / `autovalidate_package`** – automatically apply `@validate_types` to entire modules or packages.
 
 Validatedata gives you expressive, inline validation rules without defining model classes. It fits naturally into any Python workflow – from lightweight scripts to high‑volume data processing.
 
-**New in v0.5:** The validator() fast path for dramatic performance gains (see benchmarks below).
+**New in v0.6.0:**
+- **`validate_data_fast`** – the speed of `validator()` combined with rich error messages. This is an **experimental** fast path that will eventually replace `validate_data` once the API stabilises.
+- **`autovalidate` & `autovalidate_package`** – automatically apply `@validate_types` to whole modules or packages.
+- **Custom type registration** – add your own type checkers with `register_type` / `unregister_type`.
+- **`check_rule`** – validate rule dicts before using them.
+- **`VALID_RULE_KEYS`** – introspection of all recognised rule keys.
 
 Benchmarks (1 million repetitions)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -64,6 +72,8 @@ Benchmarks (1 million repetitions)
      - 2.0818s
      - 2.7938s
 
+.. note::
+   The “manual” column represents hand‑written `if` statements – fastest but not reusable or composable. Validatedata’s small overhead buys you maintainability and expressiveness.
 
 **Key features**
 
@@ -72,6 +82,8 @@ Benchmarks (1 million repetitions)
 - Rich built-in types: ``email``, ``url``, ``ip``, ``uuid``, ``semver``, ``slug``, ``color``, ``phone``, and more
 - Function and method decorators with async support
 - Conditional validation, transforms, and custom error messages
+- Auto‑validation of entire packages
+- Register your own custom types
 
 ----
 
@@ -88,6 +100,8 @@ Benchmarks (1 million repetitions)
    rules
    mirror-rules
    decorators
+   autovalidate
+   fast-validator
    examples
 
 .. toctree::

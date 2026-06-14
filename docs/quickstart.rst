@@ -41,19 +41,85 @@ Your first validation
        print(result.errors)
 
 Rules are plain strings or dicts — no classes to define, no schema objects to
-import. The rule above uses :doc:`pipe-syntax shorthand <rules>` — each field
-is a type name followed by modifiers chained with ``|``.
+import.
 
-For stricter or more complex rules the dict form is always available alongside
-the shorthand:
+----
+
+Six ways to validate
+--------------------
+
+Validatedata offers six entry points, from ultra‑fast boolean checks to automatic
+package‑wide validation.
+
+1. **`validator()`** – fastest, boolean only
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   rule = {
-       'username': {'type': 'str', 'range': (3, 32)},
-       'email':    {'type': 'email', 'message': 'please enter a valid email'},
-       'age':      {'type': 'int', 'range': (18, 'any'), 'range-message': 'must be 18 or older'},
-   }
+   from validatedata import validator
+
+   is_valid_username = validator('str|min:3|max:32')
+   if is_valid_username('alice'):
+       print('ok')
+
+2. **`validate_data_fast()`** – compiled speed + error messages (experimental)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   from validatedata import validate_data_fast
+
+   result = validate_data_fast({'name': 'alice'}, {'name': 'str|min:3'})
+   if not result.ok:
+       print(result.errors)   # full error messages
+
+   # This is a preview of the next‑generation engine and will eventually
+   # replace validate_data.
+
+3. **`validate_data()`** – general purpose
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   result = validate_data(data, rule, mutate=False)
+
+4. **`@validate` decorator**
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   from validatedata import validate
+
+   @validate(['str|min:3', 'email'])
+   def create_user(username, email):
+       return f'created {username}'
+
+5. **`@validate_types` decorator**
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   from validatedata import validate_types
+
+   @validate_types
+   def add(a: int, b: int) -> int:
+       return a + b
+
+6. **Auto‑validation of modules / packages**
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   from validatedata import autovalidate
+
+   # Place this at the bottom of a module
+   autovalidate(module=__name__, raise_exceptions=True)
+
+   # Or validate an entire package
+   from validatedata import autovalidate_package
+   autovalidate_package('my_package', include=['my_package.*'], dry_run=False)
+
+See :doc:`autovalidate` and :doc:`fast-validator` for details.
 
 ----
 
@@ -79,7 +145,7 @@ Both forms behave identically today.
 Reading the result
 ------------------
 
-:func:`validate_data` always returns a result object with three attributes:
+:func:`validate_data` and :func:`validate_data_fast` return a result object with:
 
 .. list-table::
    :header-rows: 1
@@ -93,9 +159,7 @@ Reading the result
      - List of error messages, grouped by field by default
    * - ``result.data``
      - Transformed values — only present when ``mutate=True`` is passed.
-       The shape mirrors the input: a ``dict`` input returns a ``dict`` keyed
-       by field name; a ``list`` or ``tuple`` input returns a ``list`` indexed
-       by position
+       The shape mirrors the input.
 
 .. code-block:: python
 
@@ -110,64 +174,10 @@ Reading the result
 
 ----
 
-Three ways to validate
------------------------
-
-Validatedata offers three entry points depending on where and how you want
-validation to run.
-
-validate_data
-~~~~~~~~~~~~~
-
-The core function. Pass data and a rule, get a result back.
-
-.. code-block:: python
-
-   result = validate_data(data={'name': 'alice', 'age': 25}, rule={
-       'name': 'str|min:3',
-       'age': 'int|min:18',
-   })
-
-@validate decorator
-~~~~~~~~~~~~~~~~~~~
-
-Wraps a function and validates its arguments before the body runs. On failure
-it returns ``{'errors': [...]}`` instead of calling the function (or raises
-``ValidationError`` if ``raise_exceptions=True``).
-
-.. code-block:: python
-
-   from validatedata import validate
-
-   @validate(['str|min:3', 'email'], raise_exceptions=True)
-   def create_user(username, email):
-       return f'created {username}'
-
-See :doc:`decorators` for the full decorator reference.
-
-@validate_types decorator
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Validates arguments against their Python type annotations automatically — no
-rule argument needed.
-
-.. code-block:: python
-
-   from validatedata import validate_types
-
-   @validate_types
-   def add(a: int, b: int) -> int:
-       return a + b
-
-   add(1, 2)      # fine
-   add(1, 'two')  # raises ValidationError
-
-----
-
 Parameters
 ----------
 
-All three entry points share most parameters:
+All entry points share most parameters:
 
 .. list-table::
    :header-rows: 1
@@ -183,8 +193,8 @@ All three entry points share most parameters:
      - Validation rules — see :doc:`rules`
    * - ``raise_exceptions``
      - bool
-     - ``False``
-     - Raise ``ValidationError`` on failure instead of returning errors. Default is ``True`` for ``@validate_types``
+     - ``False`` (``True`` for ``@validate_types``)
+     - Raise ``ValidationError`` on failure instead of returning errors
    * - ``is_class``
      - bool
      - ``False``
@@ -196,7 +206,7 @@ All three entry points share most parameters:
    * - ``log_errors``
      - bool
      - ``False``
-     - Log background validation errors (pass via ``kwds``)
+     - Log background validation errors
    * - ``group_errors``
      - bool
      - ``True``
