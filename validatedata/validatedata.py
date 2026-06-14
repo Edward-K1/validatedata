@@ -8,7 +8,7 @@ from collections import OrderedDict
 from functools import wraps
 from inspect import getfullargspec, iscoroutinefunction
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, get_type_hints
-
+from re import compile as _re_compile
 from .engine import (
     MAX_NESTING_DEPTH,
     ValidationError,
@@ -65,6 +65,8 @@ BASIC_TYPES = (
 )
 EXTENDED_TYPES = ("dict", "list", "object", "annotation", "regex", "set", "tuple")
 NATIVE_TYPES = (bool, float, int, str, dict, list, set, tuple)
+
+_PARAMETERIZED_RE = _re_compile(r'^(list|tuple|set)\[([^\]]+)\]$')
 
 
 # ---------------------------------------------------------------------------
@@ -147,27 +149,55 @@ class EmptyObject:
 EMPTY = EmptyObject()
 
 
-def _extract_func_spec(
-    func: Any,
-    is_class: bool = False,
-) -> tuple:
-    """Extract the static spec from a function — run once at decoration time.
+def _extract_func_spec(func: Any, is_class: bool = False) -> Tuple[List[str], OrderedDict, bool]:
+    """
+    Robust extraction of parameter names and defaults.
 
     Returns (clean_params, func_defaults, obj_is_cls).
+    - clean_params: ordered list of parameter names to validate (excludes *args/**kwargs).
+    - func_defaults: OrderedDict mapping param -> default (only for parameters that have defaults).
+    - obj_is_cls: True when the callable is an instance method or classmethod (first param is bound).
     """
-    func_defn = getfullargspec(func)
-    obj_is_cls = (
-        True
-        if (is_class or (func_defn.args and func_defn.args[0] == "self"))
-        else False
-    )
-    clean_params = func_defn.args[1:] if obj_is_cls else func_defn.args
+    sig = inspect.signature(func)
+    params = list(sig.parameters.values())
 
-    func_defaults: OrderedDict = OrderedDict()
-    if func_defn.defaults:
-        func_defaults.update(
-            zip(clean_params[-len(func_defn.defaults) :], func_defn.defaults)
-        )
+    # Determine if this is a bound method-like callable.
+    # If caller forced is_class, respect that; otherwise infer from first parameter kind/name.
+    inferred_obj_is_cls = False
+    if params:
+        first = params[0]
+        # Consider it bound if first parameter is positional (POSITIONAL_ONLY or POSITIONAL_OR_KEYWORD)
+        # and its name is a conventional 'self' or 'cls' OR the function is a function defined inside a class (best-effort).
+        if first.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD):
+            if first.name in ("self", "cls"):
+                inferred_obj_is_cls = True
+
+    obj_is_cls = bool(is_class) or inferred_obj_is_cls
+
+    # Build clean_params: include positional and keyword-only parameters, exclude var-positional and var-keyword
+    clean_params = [
+        p.name
+        for p in params
+        if p.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+    ]
+
+    # If we treat the function as a bound method, drop the first param from clean_params
+    if obj_is_cls and clean_params:
+        clean_params = clean_params[1:]
+
+    # Build defaults mapping for those clean_params
+    func_defaults = OrderedDict()
+    for p in params:
+        if p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            continue
+        if p.default is not inspect._empty:
+            # If this param is included in clean_params (after possible drop), map it
+            name = p.name
+            if obj_is_cls and params and params[0].name == name:
+                # skip the bound 'self'/'cls' default if any
+                continue
+            if name in clean_params:
+                func_defaults[name] = p.default
 
     return clean_params, func_defaults, obj_is_cls
 
@@ -952,7 +982,7 @@ def _expand_pipe_rule(rule: str) -> dict[str, Any]:
     # --- type token ---
     type_token = tokens[0].strip()
     all_types = set(BASIC_TYPES + EXTENDED_TYPES)
-    if type_token not in all_types:
+    if not (type_token in all_types or _PARAMETERIZED_RE.match(type_token)):
         raise TypeError(f"{type_token!r} is not a supported type")
 
     rule_dict = {"type": type_token}

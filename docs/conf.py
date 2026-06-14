@@ -4,9 +4,9 @@ import sys
 sys.path.insert(0, os.path.abspath('..'))
 
 project = 'validatedata'
-copyright = '2021, Edward Kigozi'
+copyright = '2026, Edward Kigozi'
 author = 'Edward Kigozi'
-release = '0.4.0'
+release = '0.6.0'
 
 extensions = [
     'sphinx.ext.autodoc',

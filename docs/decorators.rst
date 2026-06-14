@@ -245,3 +245,7 @@ When validation fails and ``raise_exceptions=False`` (the default for
    {'errors': result.errors}
 
 When ``raise_exceptions=True``, a ``ValidationError`` is raised instead.
+
+.. seealso::
+   For automatically applying ``@validate_types`` to entire modules or packages,
+   see :doc:`autovalidate`.

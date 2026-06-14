@@ -199,22 +199,24 @@ the same nested structure, ready to use without re-reading the original dict.
 
 ----
 
-Bulk data import
-----------------
+Bulk data import (high‑performance)
+------------------------------------
 
-Validate rows before writing them to a database. Collect all errors up front
-so you can report the bad rows without stopping at the first failure.
+When processing thousands or millions of rows, you often only need to know
+whether each row is valid or not. Use
+`validator()` for maximum throughput.
 
 .. code-block:: python
 
-   from validatedata import validate_data
+   from validatedata import validator
 
-   row_rule = [
+   # Pre‑compile rule once
+   row_validator = validator([
        'str|strip|min:1|max:128',    # name
        'email',                       # email
        'int|min:0',                   # age
        'str|in:active,inactive',      # status
-   ]
+   ])
 
    rows = [
        ['Alice',  'alice@example.com',  30, 'active'],
@@ -226,7 +228,48 @@ so you can report the bad rows without stopping at the first failure.
    bad_rows = []
 
    for i, row in enumerate(rows):
-       result = validate_data(row, row_rule)
+       if not row_validator(row):
+           # No error messages — just a boolean reject
+           bad_rows.append(i + 1)   # row numbers
+
+   if bad_rows:
+       print(f"Invalid rows: {bad_rows}")
+   else:
+       write_to_database(rows)
+
+If you need error messages (e.g., for a validation report), use `validate_data_fast`
+or `validate_data` instead – but for pure pass/fail, `validator()` is unbeatable.
+
+----
+
+Bulk data import (with full error messages)
+--------------------------------------------
+
+When you need to report *why* a row failed, use `validate_data_fast` (or
+`validate_data`). The fast variant is still much faster than the original.
+
+.. code-block:: python
+
+   from validatedata import validate_data_fast
+
+   row_rule = [
+       'str|strip|min:1|max:128',    # name
+       'email',                       # email
+       'int|min:0',                   # age
+       'str|in:active,inactive',      # status
+   ]
+
+   rows = [
+       ['Alice',  'alice@example.com',  30, 'active'],
+       ['',       'bob@example.com',    25, 'active'],
+       ['Carol',  'not-an-email',       28, 'active'],
+       ['Dave',   'dave@example.com',  -1,  'pending'],
+   ]
+
+   bad_rows = []
+
+   for i, row in enumerate(rows):
+       result = validate_data_fast(row, row_rule)
        if not result.ok:
            bad_rows.append({'row': i + 1, 'errors': result.errors})
 
@@ -360,3 +403,76 @@ use the cleaned values straight away without tracking positional order:
 
 ``result.data`` mirrors the shape of the input dict exactly — nested dicts are
 preserved, so a config-shaped input comes back as a config-shaped output.
+
+Auto‑validation of a module
+---------------------------
+
+Place this at the bottom of any module you want to automatically validate.
+
+.. code-block:: python
+
+   # myapp/domain.py
+   from validatedata import autovalidate
+
+   def create_order(user_id: int, product_ids: list[str]) -> dict:
+       # function body
+       return {'order_id': 123}
+
+   def calculate_total(items: list[dict], discount: float) -> float:
+       # function body
+       return 99.95
+
+   # Auto‑validate at module load
+   autovalidate(module=__name__, raise_exceptions=True)
+
+Now every call to these functions checks argument types automatically.
+
+----
+
+Validating a whole package
+--------------------------
+
+Add this to your package's ``__init__.py``:
+
+.. code-block:: python
+
+   # mypackage/__init__.py
+   from validatedata import autovalidate_package
+
+   # Validate all modules except tests, and also auto‑register any class
+   # whose name ends with 'Model' as a custom type.
+   autovalidate_package(
+       package=__name__,
+       include=["mypackage.*"],
+       exclude=["mypackage.tests.*"],
+       auto_register_types=True,
+       raise_exceptions=False,
+   )
+
+Now all functions with type hints in your package are validated at call time,
+and any ``*Model`` classes become usable as types in rules.
+
+----
+
+Using the fast validator with error messages
+--------------------------------------------
+
+Replace ``validate_data`` with ``validate_data_fast`` for a speed boost:
+
+.. code-block:: python
+
+   from validatedata import validate_data_fast
+
+   result = validate_data_fast(
+       data={'username': '  alice  ', 'score': 95},
+       rule={
+           'username': 'str|strip|min:3',
+           'score': 'int|min:0|max:100',
+       },
+       mutate=True,
+   )
+
+   if result.ok:
+       print(result.data)   # {'username': 'alice', 'score': 95}
+   else:
+       print(result.errors)
