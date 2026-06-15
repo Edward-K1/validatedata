@@ -40,6 +40,7 @@ from .engine import (
     _is_prime,
     _is_valid_color,
 )
+from .types import get_registered_checker
 
 
 # ---------------------------------------------------------------------------
@@ -422,10 +423,17 @@ def _build_type_check_callable(
                 )
         return _phone_check
 
-    # Standard strict lookup
-    if type_name not in _TYPE_CHECK:
-        raise TypeError(f'{type_name!r} is not a supported type')
-    return _TYPE_CHECK[type_name]
+    # Standard strict lookup – first try built‑in table
+    if type_name in _TYPE_CHECK:
+        return _TYPE_CHECK[type_name]
+
+    # Then try custom type registry (strict only, non‑strict not supported for customs)
+    custom_checker = get_registered_checker(type_name)
+    if custom_checker is not None:
+        # Custom checkers always run in strict mode (no literal_eval)
+        return custom_checker
+
+    raise TypeError(f'{type_name!r} is not a supported type')
 
 
 # ---------------------------------------------------------------------------
@@ -452,11 +460,11 @@ def _build_parameterized_type_check(
 ) -> Callable[[Any], bool]:
     """Compile a union-item type check for list[str], list[int,str], etc."""
     for name in item_names:
-        if name not in _ITEM_TYPE_CHECK:
+        if name not in _ITEM_TYPE_CHECK and get_registered_checker(name) is None:
             raise TypeError(
                 f'{name!r} is not a recognised item type for '
                 f'{outer_name}[{", ".join(item_names)}]. '
-                f'Supported item types: {sorted(_ITEM_TYPE_CHECK)}'
+                f'Supported item types: {sorted(_ITEM_TYPE_CHECK)} plus registered custom types'
             )
 
     _outer = _NATIVE_TYPE_MAP[outer_name]
@@ -480,7 +488,11 @@ def _build_parameterized_type_check(
 
     # --- single item type (non-native) ---
     if len(item_names) == 1:
-        _ic = _ITEM_TYPE_CHECK[item_names[0]]
+        _ic = _ITEM_TYPE_CHECK.get(item_names[0])
+        if _ic is None:
+            _ic = get_registered_checker(item_names[0])
+            if _ic is None:
+                raise TypeError(f'Item type {item_names[0]!r} not found')
         return lambda v, _o=_outer, _c=_ic: (
             isinstance(v, _o) and all(_c(i) for i in v)
         )

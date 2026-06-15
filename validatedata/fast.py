@@ -169,29 +169,47 @@ def _message_for_check_at_index(
         if rule_struct.non_strict:
             template = _msg.get("type_coercion_failed", "value could not be coerced")
             return template.replace("{expected}", type_name)
+
         display_type = arg if arg and arg != type_name else type_name
-        template = _msg.get(_TYPE_TO_MESSAGE.get(type_name, "type_invalid"), "invalid type")
+
+        # Custom type handling
+        if type_name not in _TYPE_TO_MESSAGE:
+            template = _msg.get(
+                "custom_type_invalid",
+                f"value is not of expected type '{display_type}' (got {{actual}})"
+            )
+        else:
+            template = _msg.get(_TYPE_TO_MESSAGE[type_name], "invalid type")
+
         if "{expected}" in template:
             template = template.replace("{expected}", display_type)
         if "{actual}" in template:
             template = template.replace("{actual}", type(value).__name__)
         return template
 
-    # OPT 2: Flat lookup replaces cascading if/elif for min/max/between.
+    # For min, max, between
     if validator_name in ("min", "max", "between"):
-        # OPT 1: Use module-level _COLLECTION_TYPES instead of a local frozenset.
+        # Use module-level constants _COLLECTION_TYPES and _LEN_TYPES (already defined)
         if type_name in _COLLECTION_TYPES:
             category = "collection"
         elif type_name in compiled._LEN_TYPES:
             category = "len"
         else:
             category = "number"
-        msg_key  = _RANGE_MSG_KEYS[(validator_name, category)]
+        msg_key = _RANGE_MSG_KEYS.get((validator_name, category))
+        if msg_key is None:
+            msg_key = "string_not_in_range"   # fallback
         template = _msg.get(msg_key, "value out of range")
         if arg:
-            template = template.replace("{min}", arg).replace("{max}", arg)
+            # For between, arg may be like "1,10" – but the stored arg is the raw string.
+            if validator_name == "between" and isinstance(arg, str) and "," in arg:
+                lo, hi = arg.split(",", 1)
+                template = template.replace("{min}", lo.strip()).replace("{max}", hi.strip())
+            else:
+                template = template.replace("{min}", arg).replace("{max}", arg)
         return template
 
+    # All other validators (length, in, contains, re, etc.)
     msg_key = _VALIDATOR_TO_MESSAGE.get(validator_name)
     if msg_key is None:
         msg_key = "validation_failed"

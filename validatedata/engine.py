@@ -16,6 +16,8 @@ from types import SimpleNamespace
 from typing import Any, NamedTuple
 
 from .messages import error_messages as errm
+from .types import get_registered_checker
+
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +266,12 @@ def _check_phone(value: Any, fmt: str | None, region: str | None) -> bool:
 
 def check_type(value: Any, spec: TypeSpec) -> bool:
     name = spec.name
+    
+    # Custom type checkers take precedence over built‑in ones
+    custom_checker = get_registered_checker(name)
+    if custom_checker is not None:
+        # For custom types we ignore strict/format/region – they are handled by the checker itself
+        return custom_checker(value)
 
     if name in _NATIVE_NAMES:
         expected = _NATIVE_MAP[name]

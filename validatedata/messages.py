@@ -44,4 +44,5 @@ error_messages: dict[str, str] = {
     'invalid_phone': 'value is not a valid phone number',
     'not_unique': 'collection contains duplicate values',
     'depends_on_failed': 'field validation failed due to dependency condition',
+    'custom_type_invalid': 'value is not of expected type {expected} (got {actual})'
 }
