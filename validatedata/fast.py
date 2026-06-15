@@ -225,10 +225,15 @@ def _validate_value_with_messages(
     value: Any,
     rule_struct: _CompiledRule,
     field_name: Optional[str] = None,
-) -> Tuple[bool, List[str]]:
+) -> Tuple[bool, List[str], Any]:
+    """
+    Returns (ok, errors, transformed_value).
+    transformed_value is the value after transform (if any), or the original value.
+    """
     # Fast path
     if rule_struct.fast_validator(value):
-        return True, []
+        # fast path includes transform inside compiled callable
+        return True, [], value
 
     # Slow path – run checks one by one
     transformed = value
@@ -237,16 +242,15 @@ def _validate_value_with_messages(
             transformed = rule_struct.transform(value)
         except Exception:
             msg = "transform failed"
-            return False, [f"{field_name}: {msg}" if field_name else msg]
+            return False, [f"{field_name}: {msg}" if field_name else msg], value
 
     if transformed is None:
         if rule_struct.nullable:
-            return True, []
-        return False, [f"{field_name}: value is missing" if field_name else "value is missing"]
+            return True, [], None
+        return False, [f"{field_name}: value is missing" if field_name else "value is missing"], value
 
-    # OPT 4: Bind frequently accessed slot attributes to locals before the loop.
-    checks     = rule_struct.checks
-    type_name  = rule_struct.type_name
+    checks = rule_struct.checks
+    type_name = rule_struct.type_name
 
     errors = []
     for i, check in enumerate(checks):
@@ -263,7 +267,7 @@ def _validate_value_with_messages(
                 msg = f"{field_name}: {msg}"
             errors.append(msg)
             break
-    return len(errors) == 0, errors
+    return len(errors) == 0, errors, transformed
 
 # ----------------------------------------------------------------------
 # Caches
@@ -351,11 +355,11 @@ def _validate_mapping_with_messages(
         for field, cr in field_rules.items():
             value = data.get(field)
             if isinstance(cr, _CompiledRule):
-                ok, errs = _validate_value_with_messages(value, cr, field)
+                ok, errs, transformed_val = _validate_value_with_messages(value, cr, field)
                 if not ok:
                     errors.extend(errs)
                 else:
-                    transformed[field] = value
+                    transformed[field] = transformed_val
             elif isinstance(cr, tuple):  # nested dict
                 if not isinstance(value, dict):
                     errors.append(f"{field}: expected dict, got {type(value).__name__}")
@@ -372,7 +376,7 @@ def _validate_mapping_with_messages(
         for field, cr in field_rules.items():
             value = data.get(field)
             if isinstance(cr, _CompiledRule):
-                ok, errs = _validate_value_with_messages(value, cr, field)
+                ok, errs, _ = _validate_value_with_messages(value, cr, field)
                 if not ok:
                     errors.extend(errs)
             elif isinstance(cr, tuple):  # nested dict
@@ -412,8 +416,8 @@ def validate_data_fast(
 
     if isinstance(rule, str):
         cr = _get_compiled_rule(rule)
-        ok, errors = _validate_value_with_messages(data, cr)
-        return ValidationResult(ok, errors, data if mutate else None)
+        ok, errors, transformed = _validate_value_with_messages(data, cr)
+        return ValidationResult(ok, errors, transformed if mutate else None)
 
     if isinstance(rule, dict):
         ok, errors, transformed = _validate_mapping_with_messages(data, rule, mutate)

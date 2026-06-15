@@ -7,11 +7,17 @@ Design goals
 * Fast path uses compiled.py bool callables — zero overhead on valid data.
 * Error path routes through fast._validate_value_with_messages for rich,
   human-readable messages without any extra work from the caller.
-* ``model_check``  for cross-field logic — one
-  clear contract: raise ``ValidationError`` to fail, return ``dict`` to
-  mutate, return ``None`` to pass silently.
+* ``model_check`` for cross-field logic — one clear contract: raise
+  ``ValidationError`` to fail, return ``dict`` to mutate, return ``None`` to pass.
 * ``Rule`` doubles as both the field descriptor and the compilation unit.
   ``_MISSING`` sentinel keeps "no default" distinct from ``None``.
+
+Serialisation / deserialisation
+-------------------------------
+- ``to_dict(recursive=True)`` converts the model (and any nested FastModel fields)
+  to a plain dictionary.
+- ``from_dict(cls, data)`` reconstructs a model from a dictionary, recursively
+  building nested models where the field annotation is a FastModel subclass.
 """
 from __future__ import annotations
 
@@ -156,7 +162,7 @@ class FastModel(metaclass=_FastModelMeta):
             bio: str = Rule("str|nullable")
 
         user = User(id=1, username="alice", email="alice@example.com")
-        print(user.dict())
+        print(user.to_dict())   # {'id': 1, 'username': 'alice', ...}
 
     Cross-field validation::
 
@@ -173,6 +179,11 @@ class FastModel(metaclass=_FastModelMeta):
     Partial validation (no instantiation)::
 
         ok, errors = User.check({"username": "x"})
+
+    Serialisation / deserialisation::
+
+        data = user.to_dict()
+        user2 = User.from_dict(data)
     """
 
     # ------------------------------------------------------------------
@@ -193,36 +204,25 @@ class FastModel(metaclass=_FastModelMeta):
                 data[fname] = None if default is _MISSING else default
 
         # Phase 2: validate each field
-        # Fast path (compiled bool) is hit first inside _validate_value_with_messages.
-        # Error path builds human-readable messages — no extra branching here.
         for fname, val in data.items():
             cr: _fast._CompiledRule = cls.__compiled_fields__[fname]
-            
-            # speeds up happy path?
-            # Only skip if the field is present AND valid.
-            # If val is _MISSING, we must fall through to process defaults/factories!
+
             if val is not _MISSING and cr.fast_validator(val):
-                # We still need to assign the validated value to the instance
-                setattr(self, fname, val) 
+                # fast_validator already includes transform; val is already correct.
+                object.__setattr__(self, fname, val)
                 continue
 
-            # Nullable shortcut — skip validation entirely
             if val is None and cr.nullable:
                 object.__setattr__(self, fname, None)
                 continue
 
-            ok, errs = _fast._validate_value_with_messages(val, cr, field_name=fname)
+            ok, errs, transformed_val = _fast._validate_value_with_messages(val, cr, field_name=fname)
 
             if not ok:
                 errors.extend(errs)
             else:
-                # Apply transform if present (coercions, normalisation)
-                if cr.transform is not None:
-                    try:
-                        val = cr.transform(val)
-                    except Exception:
-                        pass   # transform failure was already caught by validator
-                object.__setattr__(self, fname, val)
+                # transformed_val already has transform applied (if any)
+                object.__setattr__(self, fname, transformed_val)
 
         # Phase 3: cross-field hook
         if not errors and hasattr(self, "model_check") and callable(self.model_check):
@@ -243,31 +243,113 @@ class FastModel(metaclass=_FastModelMeta):
             raise ValidationError("\n".join(errors))
 
     # ------------------------------------------------------------------
-    # Convenience output
+    # Serialisation / deserialisation
     # ------------------------------------------------------------------
 
-    def dict(self) -> Dict[str, Any]:
-        """Return a shallow copy of the validated field values."""
-        return {k: getattr(self, k, None) for k in self.__class__.__validated_fields__}
+    def to_dict(self, recursive: bool = True) -> Dict[str, Any]:
+        """
+        Convert the model to a dictionary.
+
+        Args:
+            recursive: If True, any field that is itself a FastModel instance
+                       will be converted to a dict recursively. If False,
+                       nested models are kept as objects.
+
+        Returns:
+            A dictionary mapping field names to their values.
+        """
+        result = {}
+        cls = self.__class__
+        for fname in cls.__validated_fields__:
+            value = getattr(self, fname, None)
+            if recursive and isinstance(value, FastModel):
+                result[fname] = value.to_dict(recursive=True)
+            else:
+                result[fname] = value
+        return result
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "FastModel":
+        """
+        Construct a model instance from a dictionary, recursively building nested models.
+
+        Args:
+            data: A dictionary mapping field names to values. For fields whose
+                  annotation is a subclass of FastModel, if the corresponding value
+                  is a dict, it will be converted to that nested model automatically.
+
+        Returns:
+            An instance of the model.
+
+        Example::
+
+            class Address(FastModel):
+                street: str
+                city: str
+
+            class User(FastModel):
+                name: str
+                address: Address
+
+            user = User.from_dict({
+                "name": "Alice",
+                "address": {"street": "123 Main St", "city": "Springfield"}
+            })
+        """
+        field_types = cls.__validated_fields__
+        processed = {}
+
+        for fname, value in data.items():
+            if fname not in field_types:
+                # Ignore unknown fields – you could also raise, but skipping is more forgiving.
+                continue
+
+            annot = field_types[fname]
+
+            # Resolve forward references if necessary (simplistic: check if it's a string)
+            if isinstance(annot, str):
+                # Attempt to resolve the string to an actual class (optional)
+                # For simplicity, we skip recursion for forward refs.
+                processed[fname] = value
+                continue
+
+            # Check if the annotation is a FastModel subclass
+            if isinstance(annot, type) and issubclass(annot, FastModel):
+                if isinstance(value, dict):
+                    processed[fname] = annot.from_dict(value)
+                else:
+                    # If the value is already an instance, use it directly
+                    processed[fname] = value
+            else:
+                processed[fname] = value
+
+        # Instantiate the model – this runs all validation rules
+        return cls(**processed)
+
+    # ------------------------------------------------------------------
+    # Convenience methods
+    # ------------------------------------------------------------------
 
     def copy(self, **overrides) -> "FastModel":
         """Return a new instance with optionally overridden fields."""
-        base = self.dict()
+        base = self.to_dict(recursive=False)  # shallow copy of values
         base.update(overrides)
         return self.__class__(**base)
 
     def __repr__(self) -> str:
-        cls = self.__class__.__name__
-        parts = ", ".join(
-            f"{k}={getattr(self, k, None)!r}"
-            for k in self.__class__.__validated_fields__
-        )
-        return f"{cls}({parts})"
+        cls_name = self.__class__.__name__
+        # Use the shallow dict for representation (avoid recursion depth issues)
+        parts = []
+        for k in self.__class__.__validated_fields__:
+            v = getattr(self, k, None)
+            parts.append(f"{k}={v!r}")
+        return f"{cls_name}({', '.join(parts)})"
 
     def __eq__(self, other: object) -> bool:
         if type(other) is not type(self):
             return NotImplemented
-        return self.dict() == other.dict()
+        # Compare using the shallow dictionary – fast and sufficient
+        return self.to_dict(recursive=False) == other.to_dict(recursive=False)
 
     # ------------------------------------------------------------------
     # Class-level validation (no instantiation)
@@ -294,7 +376,7 @@ class FastModel(metaclass=_FastModelMeta):
                 errors.append(f"{fname}: unknown field")
                 continue
             cr = cls.__compiled_fields__[fname]
-            ok, errs = _fast._validate_value_with_messages(val, cr, field_name=fname)
+            ok, errs, _ = _fast._validate_value_with_messages(val, cr, field_name=fname)
             if not ok:
                 errors.extend(errs)
         return len(errors) == 0, errors
