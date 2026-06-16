@@ -6,7 +6,7 @@ from .autovalidate_package import autovalidate_package
 from .fast import validate_data_fast
 from .types import register_type, unregister_type, export_registered_checkers
 
-__version__ = '0.6.0'
+__version__ = '0.6.1'
 
 __all__ = [
     'validate',

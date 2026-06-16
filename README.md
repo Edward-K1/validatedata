@@ -237,13 +237,13 @@ from validatedata import autovalidate
 # custom type checker for decimals
 def is_decimal(v): return isinstance(v, Decimal)
 
-
 # add at the bottom of a file you want to auto-validate
-# replace placeholder details
 autovalidate(
     module="my_project.my_module",
-    type_checkers={Decimal: is_decimal},
-    raise_exceptions=True,
+    type_checkers={Decimal: is_decimal},   # custom checkers
+    raise_exceptions=True,                 # raise on failure
+    enforce_hints=False,                   # require type hints on all functions
+    # decorator=my_custom_decorator,       # optional: use your own decorator
 )
 ```
 
@@ -263,6 +263,22 @@ report = autovalidate_package(
 # print(report["decorated"])
 
 ```
+
+### Parameters:
+
+`module` – module object or name (defaults to caller’s module)
+
+`ignore` – list of strings/regex to skip (fully qualified names)
+
+`type_checkers` – extra custom type checkers
+
+`raise_exceptions` – whether to raise ValidationError (default True)
+
+`dry_run` – if True, only return names that would be decorated
+
+`decorator` – custom decorator to use instead of validate_types (ignores type_checkers & raise_exceptions)
+
+`enforce_hints` – if True, raise TypeError for any function without type annotations
 
 ## Mirror‑structure rules
 
