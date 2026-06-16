@@ -126,6 +126,43 @@ def autovalidate_package(
     def _is_already_decorated(fn):
         return getattr(fn, "_autovalidated", False)
 
+    def _build_decorated_fn(raw: Callable) -> Callable:
+        """Apply decorator or validate_types to *raw* and return the wrapped function."""
+        if decorator is not None:
+            return decorator(raw)
+        merged_checkers = dict(base_type_checkers)
+        try:
+            merged_checkers.update(types_registry.export_registered_checkers())
+        except Exception:
+            pass
+        _dec = validate_types(
+            raise_exceptions=raise_exceptions,
+            type_checkers=merged_checkers,
+        )
+        return _dec(raw)
+
+    def _check_filter(
+        full_name: str,
+        module_level_included: bool,
+        module_level_excluded: bool,
+    ) -> Optional[str]:
+        """
+        Return a skip-reason string if *full_name* should be skipped, else None.
+
+        Encodes the three-way include/exclude logic shared by methods and functions.
+        """
+        if module_level_excluded:
+            return "excluded by module-level exclude"
+        if module_level_included:
+            if exclude_compiled and _matches_any(full_name, exclude_compiled):
+                return "excluded by exclude pattern"
+        else:
+            if exclude_compiled and _matches_any(full_name, exclude_compiled):
+                return "excluded by exclude pattern"
+            if include_compiled and not _matches_any(full_name, include_compiled):
+                return "not matched by include"
+        return None
+
     decorated: List[str] = []
     skipped: List[Tuple[str, str]] = []
     import_errors: List[Tuple[str, str]] = []
@@ -276,31 +313,12 @@ def autovalidate_package(
                     )
 
                     full_name = f"{module_name}.{obj.__qualname__}.{method_name}"
-                    # Module-level exclude wins: skip all members of the module
-                    if module_level_excluded:
-                        skipped.append((full_name, "excluded by module-level exclude"))
+                    skip_reason = _check_filter(
+                        full_name, module_level_included, module_level_excluded
+                    )
+                    if skip_reason:
+                        skipped.append((full_name, skip_reason))
                         continue
-
-                    # If the module was explicitly included, allow members unless
-                    # a more specific exclude matches the member full name.
-                    if module_level_included:
-                        if exclude_compiled and _matches_any(
-                            full_name, exclude_compiled
-                        ):
-                            skipped.append((full_name, "excluded by exclude pattern"))
-                            continue
-                    else:
-                        # Module not explicitly included: require member-level include
-                        if exclude_compiled and _matches_any(
-                            full_name, exclude_compiled
-                        ):
-                            skipped.append((full_name, "excluded by exclude pattern"))
-                            continue
-                        if include_compiled and not _matches_any(
-                            full_name, include_compiled
-                        ):
-                            skipped.append((full_name, "not matched by include"))
-                            continue
 
                     if not has_hints:
                         if enforce_hints:
@@ -311,29 +329,7 @@ def autovalidate_package(
                         skipped.append((full_name, "no annotations"))
                         continue
 
-                    if decorator is not None:
-                        if not dry_run:
-                            decorated_fn = decorator(raw)
-                        else:
-                            decorated_fn = raw
-                    else:
-                        merged_checkers = dict(base_type_checkers)
-                        try:
-                            merged_checkers.update(
-                                types_registry.export_registered_checkers()
-                            )
-                        except Exception:
-                            pass
-                        _dec = validate_types(
-                            raise_exceptions=raise_exceptions,
-                            type_checkers=merged_checkers,
-                        )
-
-                        if not dry_run:
-                            decorated_fn = _dec(raw)
-                        else:
-                            decorated_fn = raw
-
+                    decorated_fn = raw if dry_run else _build_decorated_fn(raw)
                     _mark_decorated(decorated_fn)
 
                     decorated.append(full_name)
@@ -366,27 +362,12 @@ def autovalidate_package(
                 )
 
                 full_name = f"{module_name}.{name}"
-                # Module-level exclude wins: skip all members of the module
-                if module_level_excluded:
-                    skipped.append((full_name, "excluded by module-level exclude"))
+                skip_reason = _check_filter(
+                    full_name, module_level_included, module_level_excluded
+                )
+                if skip_reason:
+                    skipped.append((full_name, skip_reason))
                     continue
-
-                # If the module was explicitly included, allow members unless
-                # a more specific exclude matches the member full name.
-                if module_level_included:
-                    if exclude_compiled and _matches_any(full_name, exclude_compiled):
-                        skipped.append((full_name, "excluded by exclude pattern"))
-                        continue
-                else:
-                    # Module not explicitly included: require member-level include
-                    if exclude_compiled and _matches_any(full_name, exclude_compiled):
-                        skipped.append((full_name, "excluded by exclude pattern"))
-                        continue
-                    if include_compiled and not _matches_any(
-                        full_name, include_compiled
-                    ):
-                        skipped.append((full_name, "not matched by include"))
-                        continue
 
                 if not has_hints:
                     if enforce_hints:
@@ -397,24 +378,7 @@ def autovalidate_package(
                     skipped.append((full_name, "no annotations"))
                     continue
 
-                if decorator is not None:
-                    if not dry_run:
-                        decorated_fn = decorator(raw)
-                    else:
-                        decorated_fn = raw
-
-                else:
-                    # Merge base checkers and registry checkers so validate_types can use registered types
-                    merged_checkers = dict(base_type_checkers)
-                    try:
-                        merged_checkers.update(getattr(types_registry, "_BY_OBJ", {}))
-                        merged_checkers.update(getattr(types_registry, "_BY_NAME", {}))
-                    except Exception:
-                        pass
-                    _dec = validate_types(
-                        raise_exceptions=raise_exceptions, type_checkers=merged_checkers
-                    )
-                    decorated_fn = _dec(raw)
+                decorated_fn = raw if dry_run else _build_decorated_fn(raw)
                 _mark_decorated(decorated_fn)
 
                 decorated.append(full_name)
