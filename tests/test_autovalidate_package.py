@@ -8,6 +8,8 @@ import tempfile
 import types
 import unittest
 import textwrap
+import re
+
 from decimal import Decimal
 
 from validatedata import ValidationError, autovalidate_package
@@ -303,6 +305,241 @@ class TestAutovalidatePackage(unittest.TestCase):
                 temp_mod.price_total(1.23)
         finally:
             del sys.modules["temp_mod_decimal"]
+
+    # ------------------------------------------------------------------
+    # decorator= tests
+    # ------------------------------------------------------------------
+
+    def test_custom_decorator_replaces_validate_types_across_package(self):
+        """A custom decorator is applied to every eligible function in the package."""
+        calls = []
+
+        def tracking_decorator(fn):
+            def wrapper(*args, **kwargs):
+                calls.append(fn.__name__)
+                return fn(*args, **kwargs)
+            return wrapper
+
+        autovalidate_package(
+            package=self.pkg_name,
+            include=[f"{self.pkg_name}.*"],
+            exclude=[f"{self.pkg_name}.tests_mod"],
+            decorator=tracking_decorator,
+        )
+
+        mod_a = importlib.import_module(f"{self.pkg_name}.mod_a")
+        mod_a.add(1, 2)
+
+        self.assertIn("add", calls)
+
+    def test_custom_decorator_bypasses_validate_types_validation(self):
+        """With a passthrough decorator, no ValidationError is raised for bad input."""
+
+        def passthrough(fn):
+            def wrapper(*args, **kwargs):
+                return fn(*args, **kwargs)
+            return wrapper
+
+        autovalidate_package(
+            package=self.pkg_name,
+            include=[f"{self.pkg_name}.*"],
+            decorator=passthrough,
+        )
+
+        mod_a = importlib.import_module(f"{self.pkg_name}.mod_a")
+        # add("x", "y") is type-wrong but passthrough does no validation
+        try:
+            mod_a.add("x", "y")
+        except ValidationError:
+            self.fail(
+                "Custom passthrough decorator should not raise ValidationError"
+            )
+
+    def test_custom_decorator_applied_to_nested_subpackage(self):
+        """Custom decorator reaches functions in nested subpackages."""
+        applied = []
+
+        def spy(fn):
+            applied.append(fn.__name__)
+            return fn
+
+        autovalidate_package(
+            package=self.pkg_name,
+            include=[f"{self.pkg_name}.*"],
+            decorator=spy,
+        )
+
+        self.assertIn("echo", applied)
+
+    def test_custom_decorator_dry_run_does_not_call_decorator(self):
+        """dry_run=True must not invoke the custom decorator."""
+        applied = []
+
+        def spy(fn):
+            applied.append(fn.__name__)
+            return fn
+
+        result = autovalidate_package(
+            package=self.pkg_name,
+            include=[f"{self.pkg_name}.*"],
+            decorator=spy,
+            dry_run=True,
+        )
+
+        # Candidates should be reported …
+        self.assertIn(f"{self.pkg_name}.mod_a.add", result["decorated"])
+        # … but the decorator itself must not have been invoked
+        self.assertEqual(applied, [])
+
+    def test_custom_decorator_non_callable_raises_type_error(self):
+        """Passing a non-callable as decorator raises TypeError immediately."""
+        with self.assertRaises(TypeError):
+            autovalidate_package(
+                package=self.pkg_name,
+                decorator="not_a_function",
+            )
+
+    def test_custom_decorator_exclude_pattern_still_honoured(self):
+        """Excluded functions are not passed to the custom decorator."""
+        applied = []
+
+        def spy(fn):
+            applied.append(fn.__name__)
+            return fn
+
+        autovalidate_package(
+            package=self.pkg_name,
+            include=[f"{self.pkg_name}.*"],
+            exclude=[f"{self.pkg_name}.mod_a"],
+            decorator=spy,
+        )
+
+        self.assertNotIn("add", applied)
+
+    def test_custom_decorator_type_checkers_and_raise_exceptions_unused(self):
+        """When decorator= is set, type_checkers and raise_exceptions have no bearing
+        on validation — only the custom decorator's own behaviour matters."""
+
+        def no_op(fn):
+            # deliberately ignores annotations; always passes through
+            def wrapper(*args, **kwargs):
+                return fn(*args, **kwargs)
+            return wrapper
+
+        autovalidate_package(
+            package=self.pkg_name,
+            include=[f"{self.pkg_name}.*"],
+            decorator=no_op,
+            raise_exceptions=True,
+            type_checkers={int: lambda v: isinstance(v, int)},
+        )
+
+        mod_a = importlib.import_module(f"{self.pkg_name}.mod_a")
+        # Wrong types should not raise because the no_op decorator does no validation
+        try:
+            mod_a.add("a", "b")
+        except ValidationError:
+            self.fail("raise_exceptions/type_checkers should be ignored with decorator=")
+
+    # ------------------------------------------------------------------
+    # enforce_hints= tests
+    # ------------------------------------------------------------------
+
+    def test_enforce_hints_raises_for_unannotated_function_in_package(self):
+        """enforce_hints=True raises TypeError when an unannotated eligible function is
+        found, naming the offending fully-qualified function."""
+        # tests_mod.helper has no annotations and is not excluded here
+        with self.assertRaises(TypeError) as ctx:
+            autovalidate_package(
+                package=self.pkg_name,
+                include=[f"{self.pkg_name}.*"],
+                enforce_hints=True,
+            )
+
+        self.assertIn("enforce_hints", str(ctx.exception))
+
+    def test_enforce_hints_passes_when_unannotated_module_excluded(self):
+        """enforce_hints=True does not raise when the unannotated module is excluded."""
+        # Exclude both tests_mod (no annotations) and badmod (import error) so
+        # only mod_a and subpkg remain, which are fully annotated.
+        # Also exclude the unannotated classmethod UserModel.validate.   # <-- added comment
+        result = autovalidate_package(
+            package=self.pkg_name,
+            include=[f"{self.pkg_name}.*"],
+            exclude=[
+                f"{self.pkg_name}.tests_mod",
+                f"{self.pkg_name}.badmod",
+                re.compile(rf"{self.pkg_name}\.mod_a\.UserModel\.validate$"),   # <-- added line
+            ],
+            enforce_hints=True,
+        )
+
+        self.assertIn(f"{self.pkg_name}.mod_a.add", result["decorated"])
+        self.assertIn(f"{self.pkg_name}.subpkg.mod_b.echo", result["decorated"])
+
+    def test_enforce_hints_error_contains_fully_qualified_name(self):
+        """The TypeError message names the fully-qualified offending function."""
+        # Write a helper module with one unannotated function that won't hit
+        # a badmod import error first (walk order is alphabetical).
+        _write_file(
+            os.path.join(self.pkg_dir, "aaa_mod.py"),
+            textwrap.dedent(
+                """
+                def bare(x, y):
+                    return x + y
+                """
+            ).lstrip(),
+        )
+        self._cleanup_imports()
+
+        with self.assertRaises(TypeError) as ctx:
+            autovalidate_package(
+                package=self.pkg_name,
+                include=[f"{self.pkg_name}.aaa_mod"],
+                enforce_hints=True,
+            )
+
+        self.assertIn(f"{self.pkg_name}.aaa_mod.bare", str(ctx.exception))
+
+    def test_enforce_hints_dry_run_still_raises(self):
+        """dry_run=True does not suppress the enforce_hints TypeError."""
+        with self.assertRaises(TypeError):
+            autovalidate_package(
+                package=self.pkg_name,
+                include=[f"{self.pkg_name}.tests_mod"],
+                enforce_hints=True,
+                dry_run=True,
+            )
+
+    def test_enforce_hints_false_is_default_behaviour(self):
+        """Default behaviour (enforce_hints=False) silently skips unannotated functions."""
+        result = autovalidate_package(
+            package=self.pkg_name,
+            include=[f"{self.pkg_name}.*"],
+            dry_run=True,
+        )
+
+        # tests_mod.helper has no annotations; it must appear in skipped, not decorated
+        helper_name = f"{self.pkg_name}.tests_mod.helper"
+        self.assertNotIn(helper_name, result["decorated"])
+        self.assertTrue(
+            any(name == helper_name or "tests_mod" in name for name, _ in result["skipped"])
+        )
+
+    def test_enforce_hints_with_custom_decorator_still_raises(self):
+        """enforce_hints= and decorator= are orthogonal: missing annotations still raise
+        even when a custom decorator is supplied."""
+
+        def passthrough(fn):
+            return fn
+
+        with self.assertRaises(TypeError):
+            autovalidate_package(
+                package=self.pkg_name,
+                include=[f"{self.pkg_name}.tests_mod"],
+                decorator=passthrough,
+                enforce_hints=True,
+            )
 
 
 if __name__ == "__main__":

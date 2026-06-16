@@ -10,8 +10,8 @@ from fnmatch import fnmatch
 from types import ModuleType
 from typing import Any, Callable, Dict, Iterable, List, Optional, Pattern, Tuple, Union
 
-from validatedata import validate_types
 from validatedata import types as types_registry  # validatedata/types.py
+from validatedata import validate_types
 
 PatternOrGlob = Union[str, Pattern]
 
@@ -41,16 +41,42 @@ def autovalidate_package(
     include: Optional[Iterable[PatternOrGlob]] = None,
     exclude: Optional[Iterable[PatternOrGlob]] = None,
     *,
-    type_checkers: Optional[Dict[Any, Callable[[Any], bool]]] = None,
+    type_checkers: Optional[Dict[Any, Callable[[Any, Callable], bool]]] = None,
     raise_exceptions: bool = True,
     dry_run: bool = False,
     auto_register_types: bool = False,
     default_type_name_patterns: Optional[Iterable[str]] = None,
     custom_type_patterns: Optional[Iterable[PatternOrGlob]] = None,
     post_type_validate: bool = False,
+    decorator: Optional[Callable] = None,
+    enforce_hints: bool = False,
 ) -> Dict[str, Any]:
     """
     Walk a package and apply @validate_types to functions/methods in matched modules.
+
+    Args:
+        package: Package object or dotted name string.
+        include: Glob/regex patterns for module or member names to include.
+        exclude: Glob/regex patterns for module or member names to exclude.
+        type_checkers: Custom type validators forwarded to validate_types.
+                       Ignored when ``decorator`` is provided.
+        raise_exceptions: Forwarded to validate_types. Ignored when ``decorator``
+                          is provided.
+        dry_run: If True, return what *would* be decorated without mutating anything.
+        auto_register_types: Discover and register matching classes as custom types
+                             before decorating.
+        default_type_name_patterns: Glob patterns for class names to auto-register
+                                    (default: ``('*Model', '*Entity', '*Type')``).
+        custom_type_patterns: Additional patterns for auto-registration.
+        post_type_validate: Call ``cls.validate(instance)`` inside auto-registered
+                            type checkers.
+        decorator: Optional callable used in place of validate_types. Receives the
+                   raw function as its sole argument and must return the replacement
+                   callable (i.e. a plain decorator, not a factory). When supplied,
+                   ``type_checkers`` and ``raise_exceptions`` are ignored.
+        enforce_hints: When True, raise ``TypeError`` for any eligible function that
+                       has *no* type annotations. Functions skipped for other reasons
+                       (excluded, already decorated, etc.) are exempt.
 
     Returns a dict with keys:
       - decorated: list of fully qualified names decorated
@@ -58,6 +84,10 @@ def autovalidate_package(
       - import_errors: list of (module_name, error_repr)
       - registered_types: list of names registered (if auto_register_types)
     """
+    if decorator is not None and not callable(decorator):
+        raise TypeError(
+            f"'decorator' must be callable, got {type(decorator).__name__!r}"
+        )
     # Resolve package module
     if isinstance(package, str):
         pkg = sys.modules.get(package) or importlib.import_module(package)
@@ -96,6 +126,43 @@ def autovalidate_package(
     def _is_already_decorated(fn):
         return getattr(fn, "_autovalidated", False)
 
+    def _build_decorated_fn(raw: Callable) -> Callable:
+        """Apply decorator or validate_types to *raw* and return the wrapped function."""
+        if decorator is not None:
+            return decorator(raw)
+        merged_checkers = dict(base_type_checkers)
+        try:
+            merged_checkers.update(types_registry.export_registered_checkers())
+        except Exception:
+            pass
+        _dec = validate_types(
+            raise_exceptions=raise_exceptions,
+            type_checkers=merged_checkers,
+        )
+        return _dec(raw)
+
+    def _check_filter(
+        full_name: str,
+        module_level_included: bool,
+        module_level_excluded: bool,
+    ) -> Optional[str]:
+        """
+        Return a skip-reason string if *full_name* should be skipped, else None.
+
+        Encodes the three-way include/exclude logic shared by methods and functions.
+        """
+        if module_level_excluded:
+            return "excluded by module-level exclude"
+        if module_level_included:
+            if exclude_compiled and _matches_any(full_name, exclude_compiled):
+                return "excluded by exclude pattern"
+        else:
+            if exclude_compiled and _matches_any(full_name, exclude_compiled):
+                return "excluded by exclude pattern"
+            if include_compiled and not _matches_any(full_name, include_compiled):
+                return "not matched by include"
+        return None
+
     decorated: List[str] = []
     skipped: List[Tuple[str, str]] = []
     import_errors: List[Tuple[str, str]] = []
@@ -105,7 +172,9 @@ def autovalidate_package(
 
     # Auto-register discovered classes as types if requested
     if auto_register_types:
-        for finder, mod_name, ispkg in pkgutil.walk_packages(pkg.__path__, prefix=pkg.__name__ + "."):
+        for finder, mod_name, ispkg in pkgutil.walk_packages(
+            pkg.__path__, prefix=pkg.__name__ + "."
+        ):
             if not module_allowed(mod_name):
                 continue
             try:
@@ -144,18 +213,25 @@ def autovalidate_package(
                                 except Exception:
                                     return False
                         return True
+
                     return checker
 
                 try:
-                    types_registry.register_type(obj, make_checker(obj), register_names=True, override=False)
+                    types_registry.register_type(
+                        obj, make_checker(obj), register_names=True, override=False
+                    )
                     registered_types.append(f"{obj.__module__}.{obj.__qualname__}")
                 except Exception:
-                    registered_types.append(f"{obj.__module__}.{obj.__qualname__} (already?)")
+                    registered_types.append(
+                        f"{obj.__module__}.{obj.__qualname__} (already?)"
+                    )
 
     # Collect pending updates and apply in second phase
     pending_updates: List[Tuple[object, str, object]] = []
 
-    for finder, mod_name, ispkg in pkgutil.walk_packages(pkg.__path__, prefix=pkg.__name__ + "."):
+    for finder, mod_name, ispkg in pkgutil.walk_packages(
+        pkg.__path__, prefix=pkg.__name__ + "."
+    ):
         if not module_allowed(mod_name):
             skipped.append((mod_name, "excluded by include/exclude"))
             continue
@@ -169,8 +245,12 @@ def autovalidate_package(
         # Module-level include/exclude: if the include matches the module name,
         # allow scanning all members of that module unless a more specific
         # exclude matches the member full name.
-        module_level_included = bool(include_compiled and _matches_any(module_name, include_compiled))
-        module_level_excluded = bool(exclude_compiled and _matches_any(module_name, exclude_compiled))
+        module_level_included = bool(
+            include_compiled and _matches_any(module_name, include_compiled)
+        )
+        module_level_excluded = bool(
+            exclude_compiled and _matches_any(module_name, exclude_compiled)
+        )
 
         for name, obj in list(module.__dict__.items()):
             if name.startswith("__") and name != "__init__":
@@ -179,7 +259,10 @@ def autovalidate_package(
             # Classes
             if inspect.isclass(obj):
                 for method_name, method in list(obj.__dict__.items()):
-                    if method_name.startswith("__") and method_name not in ("__init__", "__call__"):
+                    if method_name.startswith("__") and method_name not in (
+                        "__init__",
+                        "__call__",
+                    ):
                         continue
                     if isinstance(method, property):
                         continue
@@ -196,63 +279,69 @@ def autovalidate_package(
                         raw = method
                         wrapper_kind = "function"
                     else:
-                        skipped.append((f"{module_name}.{obj.__qualname__}.{method_name}", "non-function descriptor"))
+                        skipped.append(
+                            (
+                                f"{module_name}.{obj.__qualname__}.{method_name}",
+                                "non-function descriptor",
+                            )
+                        )
                         continue
 
                     if _is_already_decorated(raw):
-                        skipped.append((f"{module_name}.{obj.__qualname__}.{method_name}", "already decorated"))
+                        skipped.append(
+                            (
+                                f"{module_name}.{obj.__qualname__}.{method_name}",
+                                "already decorated",
+                            )
+                        )
                         continue
 
                     try:
                         sig = inspect.signature(raw)
                     except (ValueError, TypeError):
-                        skipped.append((f"{module_name}.{obj.__qualname__}.{method_name}", "uninspectable"))
+                        skipped.append(
+                            (
+                                f"{module_name}.{obj.__qualname__}.{method_name}",
+                                "uninspectable",
+                            )
+                        )
                         continue
 
-                    has_hints = any(p.annotation != inspect.Parameter.empty for p in sig.parameters.values())
-                    if not has_hints:
-                        skipped.append((f"{module_name}.{obj.__qualname__}.{method_name}", "no annotations"))
-                        continue
+                    has_hints = any(
+                        p.annotation != inspect.Parameter.empty
+                        for p in sig.parameters.values()
+                    )
 
                     full_name = f"{module_name}.{obj.__qualname__}.{method_name}"
-                    # Module-level exclude wins: skip all members of the module
-                    if module_level_excluded:
-                        skipped.append((full_name, "excluded by module-level exclude"))
+                    skip_reason = _check_filter(
+                        full_name, module_level_included, module_level_excluded
+                    )
+                    if skip_reason:
+                        skipped.append((full_name, skip_reason))
                         continue
 
-                    # If the module was explicitly included, allow members unless
-                    # a more specific exclude matches the member full name.
-                    if module_level_included:
-                        if exclude_compiled and _matches_any(full_name, exclude_compiled):
-                            skipped.append((full_name, "excluded by exclude pattern"))
-                            continue
-                    else:
-                        # Module not explicitly included: require member-level include
-                        if exclude_compiled and _matches_any(full_name, exclude_compiled):
-                            skipped.append((full_name, "excluded by exclude pattern"))
-                            continue
-                        if include_compiled and not _matches_any(full_name, include_compiled):
-                            skipped.append((full_name, "not matched by include"))
-                            continue
+                    if not has_hints:
+                        if enforce_hints:
+                            raise TypeError(
+                                f"enforce_hints=True: '{full_name}' has no type annotations. "
+                                "Add annotations or add it to the exclude list."
+                            )
+                        skipped.append((full_name, "no annotations"))
+                        continue
 
-
-                    merged_checkers = dict(base_type_checkers)
-                    try:
-                        merged_checkers.update(types_registry.export_registered_checkers())
-                    except Exception:
-                        pass
-
-
-                    decorator = validate_types(raise_exceptions=raise_exceptions, type_checkers=merged_checkers)
-                    decorated_fn = decorator(raw)
+                    decorated_fn = raw if dry_run else _build_decorated_fn(raw)
                     _mark_decorated(decorated_fn)
 
                     decorated.append(full_name)
                     if not dry_run:
                         if wrapper_kind == "classmethod":
-                            pending_updates.append((obj, method_name, classmethod(decorated_fn)))
+                            pending_updates.append(
+                                (obj, method_name, classmethod(decorated_fn))
+                            )
                         elif wrapper_kind == "staticmethod":
-                            pending_updates.append((obj, method_name, staticmethod(decorated_fn)))
+                            pending_updates.append(
+                                (obj, method_name, staticmethod(decorated_fn))
+                            )
                         else:
                             pending_updates.append((obj, method_name, decorated_fn))
 
@@ -267,43 +356,29 @@ def autovalidate_package(
                 except (ValueError, TypeError):
                     skipped.append((f"{module_name}.{name}", "uninspectable"))
                     continue
-                has_hints = any(p.annotation != inspect.Parameter.empty for p in sig.parameters.values())
-                if not has_hints:
-                    skipped.append((f"{module_name}.{name}", "no annotations"))
-                    continue
+                has_hints = any(
+                    p.annotation != inspect.Parameter.empty
+                    for p in sig.parameters.values()
+                )
 
                 full_name = f"{module_name}.{name}"
-                # Module-level exclude wins: skip all members of the module
-                if module_level_excluded:
-                    skipped.append((full_name, "excluded by module-level exclude"))
+                skip_reason = _check_filter(
+                    full_name, module_level_included, module_level_excluded
+                )
+                if skip_reason:
+                    skipped.append((full_name, skip_reason))
                     continue
 
-                # If the module was explicitly included, allow members unless
-                # a more specific exclude matches the member full name.
-                if module_level_included:
-                    if exclude_compiled and _matches_any(full_name, exclude_compiled):
-                        skipped.append((full_name, "excluded by exclude pattern"))
-                        continue
-                else:
-                    # Module not explicitly included: require member-level include
-                    if exclude_compiled and _matches_any(full_name, exclude_compiled):
-                        skipped.append((full_name, "excluded by exclude pattern"))
-                        continue
-                    if include_compiled and not _matches_any(full_name, include_compiled):
-                        skipped.append((full_name, "not matched by include"))
-                        continue
+                if not has_hints:
+                    if enforce_hints:
+                        raise TypeError(
+                            f"enforce_hints=True: '{full_name}' has no type annotations. "
+                            "Add annotations or add it to the exclude list."
+                        )
+                    skipped.append((full_name, "no annotations"))
+                    continue
 
-
-                # Merge base checkers and registry checkers so validate_types can use registered types
-                merged_checkers = dict(base_type_checkers)
-                try:
-                    merged_checkers.update(getattr(types_registry, "_BY_OBJ", {}))
-                    merged_checkers.update(getattr(types_registry, "_BY_NAME", {}))
-                except Exception:
-                    pass
-
-                decorator = validate_types(raise_exceptions=raise_exceptions, type_checkers=merged_checkers)
-                decorated_fn = decorator(raw)
+                decorated_fn = raw if dry_run else _build_decorated_fn(raw)
                 _mark_decorated(decorated_fn)
 
                 decorated.append(full_name)
@@ -319,7 +394,12 @@ def autovalidate_package(
             try:
                 setattr(owner, attr_name, new_obj)
             except Exception as e:
-                skipped.append((f"{getattr(owner, '__name__', repr(owner))}.{attr_name}", f"setattr failed: {e}"))
+                skipped.append(
+                    (
+                        f"{getattr(owner, '__name__', repr(owner))}.{attr_name}",
+                        f"setattr failed: {e}",
+                    )
+                )
 
     return {
         "decorated": decorated,

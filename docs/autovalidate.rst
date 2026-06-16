@@ -56,6 +56,12 @@ Parameters
    * - ``dry_run``
      - ``False``
      - If ``True``, return list of names that would be decorated without modifying anything
+   * - ``decorator``
+     - ``None``
+     - Optional callable used in place of ``validate_types``. Must be a plain decorator (accepts a function, returns a wrapped function). When provided, ``type_checkers`` and ``raise_exceptions`` are ignored.
+   * - ``enforce_hints``
+     - ``False``
+     - If ``True``, raise ``TypeError`` for any eligible function that has no type annotations (functions already skipped by ignore lists are exempt).
 
 Returns
 ~~~~~~~
@@ -84,6 +90,54 @@ Walk a package and apply ``@validate_types`` to all matching modules.
    print(report["decorated"])      # list of decorated callables
    print(report["skipped"])        # (name, reason)
    print(report["import_errors"])  # modules that failed to import
+   
+   
+``autovalidate_package()`` parameters
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. list-table::
+    :header-rows: 1
+    :widths: 25 15 60
+
+    * - Parameter
+    - Default
+    - Description
+    * - ``package``
+    - required
+    - Package object or dotted name
+    * - ``include``
+    - ``None``
+    - Glob/regex patterns for module or member names to include
+    * - ``exclude``
+    - ``None``
+    - Glob/regex patterns for module or member names to exclude
+    * - ``type_checkers``
+    - ``None``
+    - Custom type validators forwarded to ``validate_types``
+    * - ``raise_exceptions``
+    - ``True``
+    - Forwarded to ``validate_types``
+    * - ``dry_run``
+    - ``False``
+    - If ``True``, return what would be decorated without mutating
+    * - ``auto_register_types``
+    - ``False``
+    - Discover and register matching classes as custom types
+    * - ``default_type_name_patterns``
+    - ``('*Model', '*Entity', '*Type')``
+    - Glob patterns for class names to auto‑register
+    * - ``custom_type_patterns``
+    - ``None``
+    - Additional patterns for auto‑registration
+    * - ``post_type_validate``
+    - ``False``
+    - Call ``cls.validate(instance)`` inside auto‑registered type checkers
+    * - ``decorator``
+    - ``None``
+    - Optional callable used in place of ``validate_types`` (ignores ``type_checkers`` & ``raise_exceptions``)
+    * - ``enforce_hints``
+    - ``False``
+    - If ``True``, raise ``TypeError`` for any eligible function without type hints
 
 Advanced: auto‑register types from naming conventions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

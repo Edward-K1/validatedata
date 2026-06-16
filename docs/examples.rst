@@ -476,3 +476,43 @@ Replace ``validate_data`` with ``validate_data_fast`` for a speed boost:
        print(result.data)   # {'username': 'alice', 'score': 95}
    else:
        print(result.errors)
+       
+----
+       
+Enforcing type hints with ``enforce_hints``
+--------------------------------------------
+
+Use ``enforce_hints=True`` to catch functions that accidentally lack type annotations.
+
+.. code-block:: python
+
+    from validatedata import autovalidate
+
+    def no_hints(a, b):   # Missing type hints
+        return a + b
+
+    def with_hints(x: int, y: int) -> int:
+        return x + y
+
+    # The following line would raise TypeError because 'no_hints' has no annotations
+    # autovalidate(enforce_hints=True)
+
+    # Instead, skip it explicitly
+    autovalidate(ignore=["__main__.no_hints"], enforce_hints=True)
+
+Using a custom decorator
+------------------------
+
+You can replace ``validate_types`` with your own decorator, for example to add logging.
+
+.. code-block:: python
+
+    from validatedata import autovalidate
+
+    def log_and_validate(fn):
+        def wrapper(*args, **kwargs):
+            print(f"Calling {fn.__name__}")
+            return fn(*args, **kwargs)
+        return wrapper
+
+    autovalidate(decorator=log_and_validate)

@@ -5,12 +5,15 @@ from typing import Any, Callable, Dict, List, Optional, Pattern, Union
 
 from validatedata import validate_types
 
+
 def autovalidate(
     module: Union[object, str, None] = None,
     ignore: Optional[List[Union[str, Pattern]]] = None,
     type_checkers: Optional[Dict[Any, Callable[[Any], bool]]] = None,
     raise_exceptions: bool = True,
     dry_run: bool = False,
+    decorator: Optional[Callable] = None,
+    enforce_hints: bool = False,
 ) -> List[str]:
     """
     Automatically apply @validate_types to all callables with type hints in a module.
@@ -23,6 +26,15 @@ def autovalidate(
         dry_run: If True, do not mutate module/class objects; return list of names that
                  would be decorated. If False, perform decoration and return list of
                  decorated names.
+        decorator: Optional callable to use in place of validate_types. When provided it
+                   is called with the target function as its sole argument and must return
+                   the replacement callable (i.e. it should be a plain decorator, not a
+                   decorator factory). ``type_checkers`` and ``raise_exceptions`` are
+                   ignored when a custom decorator is supplied.
+        enforce_hints: When True, raise ``TypeError`` for any eligible function that has
+                       *no* type annotations on any of its parameters. Functions that are
+                       skipped for other reasons (dunder, ignored, already decorated, etc.)
+                       are not subject to this check.
     Returns:
         List of fully qualified names that were (or would be) decorated.
     """
@@ -77,13 +89,6 @@ def autovalidate(
         except (ValueError, TypeError):
             return obj, None  # built-in or C function or otherwise uninspectable
 
-        # Only decorate if any parameter has an annotation
-        has_hints = any(
-            p.annotation != inspect.Parameter.empty for p in sig.parameters.values()
-        )
-        if not has_hints:
-            return obj, None
-
         full_name = (
             f"{parent_full_name}.{name}"
             if parent_full_name
@@ -95,22 +100,49 @@ def autovalidate(
         if _is_already_decorated(obj):
             return obj, None
 
-        # Merge provided type_checkers with registered checkers from validatedata.types
-        merged_checkers = dict(type_checkers or {})
-        try:
-            from validatedata.types import export_registered_checkers
-            merged_checkers.update(export_registered_checkers())
-        except Exception:
-            # fallback to provided checkers only
-            pass
-        
-        decorator = validate_types(
-            raise_exceptions=raise_exceptions,
-            type_checkers=merged_checkers,
+        # Check annotation presence — enforce_hints raises for eligible unannotated functions
+        has_hints = any(
+            p.annotation != inspect.Parameter.empty for p in sig.parameters.values()
         )
+        if not has_hints:
+            if enforce_hints:
+                raise TypeError(
+                    f"enforce_hints=True: '{full_name}' has no type annotations. "
+                    "Add annotations or add it to the ignore list."
+                )
+            return obj, None
 
+        # Build the decorated version using the custom decorator or validate_types
+        if decorator is not None:
+            # Custom decorator: called as decorator(fn) → wrapped fn
+            if not callable(decorator):
+                raise TypeError(
+                    f"'decorator' must be callable, got {type(decorator).__name__!r}"
+                )
 
-        decorated = decorator(obj)
+            if not dry_run:
+                decorated = decorator(obj)
+            else:
+                decorated = obj
+        else:
+            # Default: validate_types, merged with any registered checkers
+            merged_checkers = dict(type_checkers or {})
+            try:
+                from validatedata.types import export_registered_checkers
+
+                merged_checkers.update(export_registered_checkers())
+            except Exception:
+                pass
+
+            _decorator = validate_types(
+                raise_exceptions=raise_exceptions,
+                type_checkers=merged_checkers,
+            )
+
+            if not dry_run:
+                decorated = _decorator(obj)
+            else:
+                decorated = obj
 
         # Mark decorated wrapper so we don't double-decorate later
         _mark_decorated(decorated)
