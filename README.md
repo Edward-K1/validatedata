@@ -25,11 +25,9 @@ Validatedata gives you expressive, inline validation rules without defining mode
 
 ### Benchmarks (3 million repetitions)
 | Test | validatedata (validator) | msgspec | pydantic | fastjsonschema |
-|------|-------------|--------|-------------|---------|----------|----------------|
+|------|---------------------|-------------|---------|----------|
 | Dict  (valid) | 5.6091s | 2.6221s | 11.9899s |  14.6283s|
 | Dict (invalid) | 0.9845s | 3.5143s | 13.9074s | 9.3520s |
-
-> **Note:** The “manual” column represents hand‑written `if` statements + dataclasses – fastest but not reusable. Validatedata’s small overhead buys you maintainability and expressiveness.
 
 
 ## Fast validation with `validator()`
