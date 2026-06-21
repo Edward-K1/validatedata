@@ -106,7 +106,38 @@ def validatedata_validate(data: Dict[str, Any]) -> bool:
     except Exception:
         return False
 
+# -----------------------------
+# FastModel
+# -----------------------------
+from validatedata import FastModel, Rule
 
+class AddressFM(FastModel):
+    street: str = Rule(min=1)
+    city: str = Rule(min=1)
+    zip: str = Rule(length=5)
+
+class ProfileFM(FastModel):
+    email: str = Rule("email")
+    age: int = Rule(min=0, max=120)
+    address: AddressFM
+
+class UserFM(FastModel):
+    id: int
+    name: str = Rule(min=1)
+    profile: ProfileFM
+    
+class NestedFM(FastModel):
+    user: UserFM
+
+def fastmodel_validate(data: Dict[str, Any]) -> bool:
+    try:
+        return NestedFM.from_dict(data) is not None  # or check
+        return True
+    except Exception:
+        return False
+        
+        
+        
 # -----------------------------
 # Pydantic v2
 # -----------------------------
@@ -254,13 +285,14 @@ def bench_all(data, reps: int):
     print(f"\n=== Running {reps:,} reps (~{size} bytes) ===")
 
     for label, fn in [
-        ("validatedata", validatedata_validate),
+        ("validatedata_validator", validatedata_validate),
+        ("fastmodel", fastmodel_validate),
         ("pydantic_v2", pydantic_validate),
         ("fastjsonschema", fastjsonschema_validate),
         ("msgspec", msgspec_validate),
     ]:
         total, ops, ok = run_once(fn, data, reps)
-        print(f"{label:18s} {total:7.4f}s {ops:10,.0f} ops/s   ok: {ok:,}")
+        print(f"{label:22s} {total:7.4f}s {ops:10,.0f} ops/s   ok: {ok:,}")
 
 
 if __name__ == "__main__":

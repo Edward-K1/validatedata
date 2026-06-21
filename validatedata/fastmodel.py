@@ -80,6 +80,51 @@ def _diagnose_to_errors(value: Any, cr: _fast._CompiledRule, field_name: Optiona
         transformed = value
 
     return True, [], transformed
+    
+def _make_model_validator(cls) -> Callable[[Mapping[str, Any]], bool]:
+    """
+    Generates a single, highly optimized, fused dictionary validator for the entire FastModel tree.
+    """
+    lines = ["def _fn(data):"]
+    lines.append("    if not isinstance(data, dict): return False")
+    
+    ns = {"_MISSING": _MISSING, "_allowed_keys": set(cls.__validated_fields__)}
+    
+    # 1. Reject unknown fields (O(N) fast set lookup)
+    lines.append("    for k in data:")
+    lines.append("        if k not in _allowed_keys: return False")
+    
+    # 2. Validate defined fields
+    for i, fname in enumerate(cls.__validated_fields__):
+        cr = cls.__compiled_fields__[fname]
+        rule_obj = cls.__field_rules__[fname]
+        
+        # MAGIC: If it's a nested model, pull its fused validator to flatten the execution tree!
+        if fname in cls.__nested_model_fields__:
+            nested_cls = cls.__nested_model_fields__[fname]
+            check_fn = getattr(nested_cls, "__fast_validator__", cr.fast_validator)
+        else:
+            check_fn = cr.fast_validator
+            
+        ns[f"_f{i}"] = fname
+        ns[f"_c{i}"] = check_fn
+        
+        # Enforce exact FastModel semantics
+        if rule_obj.has_default:
+            lines.append(f"    _v{i} = data.get(_f{i}, _MISSING)")
+            lines.append(f"    if _v{i} is not _MISSING and not _c{i}(_v{i}): return False")
+        elif cr.nullable:
+            lines.append(f"    if not _c{i}(data.get(_f{i})): return False")
+        else:
+            lines.append(f"    try: _v{i} = data[_f{i}]")
+            lines.append(f"    except KeyError: return False")
+            lines.append(f"    if not _c{i}(_v{i}): return False")
+            
+    lines.append("    return True")
+    
+    code = compile("\n".join(lines), f"<fastmodel_{cls.__name__}>", "exec")
+    exec(code, ns)
+    return ns["_fn"]
 
 
 
@@ -259,6 +304,14 @@ class _FastModelMeta(type):
             and issubclass(hint, FastModel)
             and hint is not FastModel
         }
+        
+        # Build the fused fast validator for this specific model
+        try:
+            cls.__fast_validator__ = _make_model_validator(cls)
+        except Exception:
+            cls.__fast_validator__ = None
+
+        return cls
 
         return cls
 
@@ -306,6 +359,8 @@ class FastModel(metaclass=_FastModelMeta):
         data = user.to_dict()
         user2 = User.from_dict(data)
     """
+    
+    __fast_validator__ = None
 
     # ------------------------------------------------------------------
     # Construction — the hot path
@@ -386,6 +441,19 @@ class FastModel(metaclass=_FastModelMeta):
 
         if errors:
             raise ValidationError(errors)
+            
+    @classmethod
+    def _get_fast_validator(cls):
+        if cls.__fast_validator__ is None:
+            # Generate only if the class actually has compiled fields
+            if cls.__validated_fields__:
+                try:
+                    cls.__fast_validator__ = _make_model_validator(cls)
+                except Exception:
+                    cls.__fast_validator__ = False   # sentinel to avoid retrying
+            else:
+                cls.__fast_validator__ = lambda d: isinstance(d, dict)
+        return cls.__fast_validator__ if cls.__fast_validator__ is not False else None
     
 
     def is_valid(self, *, field: Optional[str] = None, apply_transforms: bool = False) -> bool:
@@ -453,6 +521,12 @@ class FastModel(metaclass=_FastModelMeta):
         - apply_transforms True: run per-field transform before boolean check.
         Returns True if all provided fields pass; unknown fields cause False.
         """
+        # FUSED PATH: Single function call validates the entire nested tree
+        if not apply_transforms:
+            validator = cls._get_fast_validator()
+            if validator is not None:
+                return validator(data)
+            
         for fname, val in data.items():
             # unknown field -> treat as invalid
             if fname not in cls.__validated_fields__:
@@ -598,40 +672,23 @@ class FastModel(metaclass=_FastModelMeta):
 
         # --- validate="check": fast boolean guard, then bypass path ---------
         if validate == "check":
-            # is_valid_data is flat — it can't descend into nested dicts.
-            # Recursively check each nested model field first; if any returns
-            # None (invalid), propagate None immediately.
-            nested_fields = cls.__nested_model_fields__
-            if nested_fields:
-                for fname, nested_cls in nested_fields.items():
-                    value = data.get(fname)
-                    if isinstance(value, dict):
-                        if nested_cls.from_dict(value, validate="check") is None:
-                            return None
             if not cls.is_valid_data(data):
                 return None
+                
             # Fall through to the bypass path below with already-confirmed data
 
         # --- bypass path (validate=False or post-check) ---------------------
-        field_types = cls.__validated_fields__
-        nested_fields = cls.__nested_model_fields__          # pre-computed at class time
-        field_rules = cls.__field_rules__
-
+        # Bypass path (validate=False or after check)
         instance = object.__new__(cls)
-
-        for fname in field_types:
+        for fname in cls.__validated_fields__:
             if fname in data:
                 value = data[fname]
-                # Recurse into nested FastModel fields
-                if fname in nested_fields and isinstance(value, dict):
-                    value = nested_fields[fname].from_dict(value)
+                if fname in cls.__nested_model_fields__ and isinstance(value, dict):
+                    value = cls.__nested_model_fields__[fname].from_dict(value, validate=False)
             else:
-                # Apply default exactly as __init__ does
-                value = field_rules[fname].get_default()
+                value = cls.__field_rules__[fname].get_default()
                 if value is _MISSING:
-                    cr = cls.__compiled_fields__[fname]
-                    value = None if cr.nullable else _MISSING
-
+                    value = None if cls.__compiled_fields__[fname].nullable else _MISSING
             object.__setattr__(instance, fname, value)
 
         return instance
