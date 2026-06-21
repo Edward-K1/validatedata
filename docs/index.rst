@@ -11,18 +11,20 @@ validatedata
 
 An easier way to validate data in python.
 
-**Six validation modes – one simple syntax.**
+**Seven validation modes – one simple syntax.**
 
-1. **`validator()`** – compile rules into ultra‑fast boolean callables. Ideal for high‑throughput streaming.
-2. **`validate_data_fast()`** – same compiled speed but with **full error messages** (preview of the next‑gen engine).
-3. **`validate_data()`** – general‑purpose validation with detailed errors, nested structures, and optional mutation.
-4. **`@validate`** – decorator for function argument validation.
-5. **`@validate_types`** – decorator that uses Python type annotations.
-6. **`autovalidate` / `autovalidate_package`** – automatically apply `@validate_types` to entire modules or packages.
+ 1. **`validator()`** – compile rules into ultra‑fast boolean callables. Ideal for high‑throughput streaming.
+ 2. **`validate_data_fast()`** – same compiled speed but with **full error messages** (preview of the next‑gen engine).
+ 3. **`validate_data()`** – general‑purpose validation with detailed errors, nested structures, and optional mutation.
+ 4. **`@validate`** – decorator for function argument validation.
+ 5. **`@validate_types`** – decorator that uses Python type annotations.
+ 6. **`FastModel`** – declarative, typed models with compiled validation, rich error messages, and serialization.
+ 7. **`autovalidate` / `autovalidate_package`** – automatically apply `@validate_types` to entire modules or packages.
 
 Validatedata gives you expressive, inline validation rules without defining model classes. It fits naturally into any Python workflow – from lightweight scripts to high‑volume data processing.
 
-**New in v0.6.0:**
+**New in v0.6:**
+- **`FastModel`** – declarative models with compiled validation, cross‑field checks, and zero‑overhead serialization.
 - **`validate_data_fast`** – the speed of `validator()` combined with rich error messages. This is an **experimental** fast path that will eventually replace `validate_data` once the API stabilises.
 - **`autovalidate` & `autovalidate_package`** – automatically apply `@validate_types` to whole modules or packages.
 - **Custom type registration** – add your own type checkers with `register_type` / `unregister_type`.
@@ -102,6 +104,7 @@ Benchmarks (1 million repetitions)
    decorators
    autovalidate
    fast-validator
+   fastmodel
    examples
 
 .. toctree::

@@ -4,18 +4,20 @@
 
 An easier way to validate data in python.
 
-**Six validation modes – one simple syntax.**
+**Seven validation modes – one simple syntax.**
 
 1. **`validator()`** – compile rules into ultra‑fast boolean callables. Ideal for high‑throughput streaming.
-2. **`validate_data_fast()`** – compiled speed with **full error messages** (preview of the next‑gen engine – will eventually replace `validate_data`).
-3. **`validate_data()`** – general‑purpose validation with detailed errors, nested structures, and optional mutation.
-4. **`@validate`** – decorator for function argument validation.
-5. **`@validate_types`** – decorator that uses Python type annotations.
-6. **`autovalidate` / `autovalidate_package`** – automatically apply `@validate_types` to entire modules or packages.
+2. **`FastModel`** – declarative, typed models with compiled validation, rich error messages, and serialization.
+3. **`validate_data_fast()`** – compiled speed with **full error messages** (preview of the next‑gen engine – will eventually replace `validate_data`).
+4. **`validate_data()`** – general‑purpose validation with detailed errors, nested structures, and optional mutation.
+5. **`@validate`** – decorator for function argument validation.
+6. **`@validate_types`** – decorator that uses Python type annotations.
+7. **`autovalidate` / `autovalidate_package`** – automatically apply `@validate_types` to entire modules or packages.
 
 Validatedata gives you expressive, inline validation rules without defining model classes. It fits naturally into any Python workflow – from lightweight scripts to high‑volume data processing.
 
-**New in v0.6.0:** 
+**New in v0.6:** 
+- **`FastModel`** – declarative models with compiled validation, cross‑field checks, and serialization.
 - **`validate_data_fast`** – the speed of `validator()` combined with rich error messages (experimental fast path, will eventually replace `validate_data`).
 - **`autovalidate` & `autovalidate_package`** – automatic application of `@validate_types` to whole modules or packages.
 - **Custom type registration** – add your own type checkers with `register_type` / `unregister_type`.
@@ -23,9 +25,11 @@ Validatedata gives you expressive, inline validation rules without defining mode
 
 ### Benchmarks (3 million repetitions)
 | Test | validatedata (validator) | msgspec | pydantic | fastjsonschema |
-|------|---------------------|-------------|---------|----------|
+|------|-------------|--------|-------------|---------|----------|----------------|
 | Dict  (valid) | 5.6091s | 2.6221s | 11.9899s |  14.6283s|
 | Dict (invalid) | 0.9845s | 3.5143s | 13.9074s | 9.3520s |
+
+> **Note:** The “manual” column represents hand‑written `if` statements + dataclasses – fastest but not reusable. Validatedata’s small overhead buys you maintainability and expressiveness.
 
 
 ## Fast validation with `validator()`
@@ -49,7 +53,9 @@ validate_user = validator({
     'age':      'int|min:18'
 })
 
-validate_user({'username': 'bob', 'email': 'bob@example.com', 'age': 25})   # True
+if validate_user({'username': 'bob', 'email': 'bob@example.com', 'age': 25}):
+    do()
+
 
 # Parameterized containers
 is_str_list = validator('list[str]')
@@ -73,6 +79,35 @@ v({
 
 
 ```
+
+## Declarative models with `FastModel`
+
+For structured data that you reuse across your application, `FastModel` gives you a declarative, typed model with compiled validation, rich error messages, and built‑in serialization.
+
+```python
+from validatedata import FastModel, Rule
+
+class User(FastModel):
+    id: int
+    username: str = Rule(min=3, max=32, pattern=r'^[a-z0-9_]+$')
+    email: str = Rule("email")
+    tags: list[str] = Rule(default=[], init_new=True, max_items=20)
+
+    def model_check(self, data: dict):
+        # cross‑field validation
+        if data["id"] < 0:
+            raise ValidationError({"id": ["ID must be positive"]})
+
+# Instantiate – validates on creation
+user = User(id=1, username="alice", email="alice@example.com")
+
+# Serialise to dict
+data = user.to_dict()   # {'id': 1, 'username': 'alice', ...}
+
+# Reconstruct from dict (fast bypass or full validation)
+user2 = User.from_dict(data) # returns None if data is invalid. set validate=True to throw exceptions
+```
+FastModel combines the speed of compiled rules with the convenience of dataclasses – ideal for API models and configuration objects
 
 ## Installation
 

@@ -69,7 +69,8 @@ _RANGE_MSG_KEYS: Dict[Tuple[str, str], str] = {
 # ----------------------------------------------------------------------
 class _CompiledRule:
     __slots__ = ("fast_validator", "checks", "nullable", "type_name", "transform",
-                 "validator_names", "validator_args", "custom_msg", "non_strict")
+                 "validator_names", "validator_args", "custom_msg", "non_strict",
+                 "rule_str")
     def __init__(
         self,
         fast_validator: Callable[[Any], bool],
@@ -81,16 +82,19 @@ class _CompiledRule:
         validator_args: List[Any],
         custom_msg: Optional[str] = None,
         non_strict: bool = False,
+        rule_str: Optional[str] = None,
     ):
         self.fast_validator = fast_validator
         self.checks = checks
         self.nullable = nullable
         self.type_name = type_name
         self.transform = transform
-        self.validator_names = validator_names   # parallel to checks
+        self.validator_names = validator_names
         self.validator_args = validator_args
         self.custom_msg = custom_msg
-        self.non_strict = non_strict             # True when literal_eval coercion is in play
+        self.non_strict = non_strict
+        self.rule_str = rule_str
+
 
 # ----------------------------------------------------------------------
 # Compile a pipe rule string into a _CompiledRule
@@ -145,6 +149,7 @@ def _compile_pipe_rule_to_struct(rule_str: str) -> _CompiledRule:
         validator_args=validator_args,
         custom_msg=custom_msg,
         non_strict=non_strict,
+        rule_str=rule_str, 
     )
 
 # ----------------------------------------------------------------------
@@ -203,10 +208,15 @@ def _message_for_check_at_index(
         if arg:
             # For between, arg may be like "1,10" – but the stored arg is the raw string.
             if validator_name == "between" and isinstance(arg, str) and "," in arg:
+                msg_key = _RANGE_MSG_KEYS.get(("between", category), "string_not_in_range")
+                template = _msg.get(msg_key, "value out of range")
                 lo, hi = arg.split(",", 1)
                 template = template.replace("{min}", lo.strip()).replace("{max}", hi.strip())
             else:
-                template = template.replace("{min}", arg).replace("{max}", arg)
+                msg_key = _RANGE_MSG_KEYS.get((validator_name, category), "string_not_in_range")
+                template = _msg.get(msg_key, "value out of range")
+                if arg:
+                    template = template.replace("{min}", arg).replace("{max}", arg)
         return template
 
     # All other validators (length, in, contains, re, etc.)
@@ -447,5 +457,8 @@ class ValidationResult:
 def _clear_fast_caches():
     _get_compiled_rule.cache_clear()
     _get_compiled_dict_rule.cache_clear()
+    
+    from validatedata.diagnose import _DIAG_CACHE
+    _DIAG_CACHE.clear()
 
 register_cache_clear_callback(_clear_fast_caches)

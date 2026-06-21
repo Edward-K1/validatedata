@@ -539,9 +539,7 @@ def _cache_set(key: str, fn: Callable) -> None:
 # Core compiler
 # ---------------------------------------------------------------------------
 
-def _compile_pipe_rule(
-    rule_str: str,
-) -> tuple[Callable | None, list[Callable[[Any], bool]], bool]:
+def _compile_pipe_rule(rule_str: str, *, _fuse: bool = True) -> tuple[Callable | None, list[Callable[[Any], bool]], bool]:
     """Compile a pipe rule string into its fast-path components.
 
     Returns a 3-tuple: (transform_fn_or_None, [type_check, *validators], nullable).
@@ -786,11 +784,10 @@ def _compile_pipe_rule(
     # Non-strict types embed literal_eval in their type_check; fusing the
     # range would require duplicating coercion logic for minimal gain.
     if (
-        (_fuse_lo is not None or _fuse_hi is not None)
-        and not validators
-        and transform_fn is None
-        and effective_strict
-        and _item_type_names is None
+        _fuse
+        and (_fuse_lo is not None or _fuse_hi is not None)
+        and not validators and transform_fn is None
+        and effective_strict and _item_type_names is None
     ):
         return None, [_try_fuse_type_range(type_name, type_check, _fuse_lo, _fuse_hi)], nullable
 

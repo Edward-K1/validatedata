@@ -516,3 +516,28 @@ You can replace ``validate_types`` with your own decorator, for example to add l
         return wrapper
 
     autovalidate(decorator=log_and_validate)
+    
+----
+
+FastModel for structured data
+-----------------------------
+
+When you have a recurring data shape, define a model once and reuse it.
+
+.. code-block:: python
+
+    from validatedata import FastModel, Rule
+
+    class Product(FastModel):
+        name: str = Rule(min=3, max=100)
+        price: float = Rule(min=0)
+        tags: list[str] = Rule(default=[], init_new=True, max_items=10)
+
+    # Create and validate
+    product = Product(name="Widget", price=19.99, tags=["new", "featured"])
+
+    # Serialize to dict
+    data = product.to_dict()
+
+    # Reconstruct from dict (fast path)
+    product2 = Product.from_dict(data, validate="check")

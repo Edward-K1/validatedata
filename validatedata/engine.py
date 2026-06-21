@@ -13,7 +13,7 @@ from dataclasses import dataclass, field as dc_field
 from datetime import datetime
 from dateutil.parser import parse as parse_date
 from types import SimpleNamespace
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, List, Dict
 
 from .messages import error_messages as errm
 from .types import get_registered_checker
@@ -25,7 +25,45 @@ from .types import get_registered_checker
 # ---------------------------------------------------------------------------
 
 class ValidationError(Exception):
-    pass
+    """
+    Raised when FastModel validation fails.
+
+    Attributes
+    ----------
+    errors : dict[str, list[str]]
+        Structured errors keyed by field name.  Model-level errors (from
+        ``model_check``) are stored under the ``"__model__"`` key.
+        Always present; empty dict when the exception was raised with a
+        plain string (e.g. from non-FastModel callers).
+
+    Examples
+    --------
+        try:
+            User(username="a", email="bad")
+        except ValidationError as exc:
+            exc.errors
+            # {
+            #   "username": ["value is too short (minimum length: 3)"],
+            #   "email":    ["value is not a valid email address"],
+            # }
+            str(exc)
+            # "username: value is too short (minimum length: 3)\n
+            #  email: value is not a valid email address"
+    """
+
+    def __init__(self, message_or_errors, /):
+        if isinstance(message_or_errors, dict):
+            self.errors: Dict[str, List[str]] = message_or_errors
+            # Flatten to a human-readable string for str(exc) and logging.
+            parts = []
+            for field, messages in message_or_errors.items():
+                for msg in messages:
+                    parts.append(msg if field == "__model__" else f"{field}: {msg}")
+            super().__init__("\n".join(parts))
+        else:
+            # Plain string — legacy / non-FastModel raise sites.
+            self.errors: Dict[str, List[str]] = {}
+            super().__init__(str(message_or_errors))
 
 
 # ---------------------------------------------------------------------------

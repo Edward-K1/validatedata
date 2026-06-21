@@ -45,7 +45,7 @@ import.
 
 ----
 
-Six ways to validate
+Seven ways to validate
 --------------------
 
 Validatedata offers six entry points, from ultra‑fast boolean checks to automatic
@@ -105,7 +105,20 @@ package‑wide validation.
    def add(a: int, b: int) -> int:
        return a + b
 
-6. **Auto‑validation of modules / packages**
+       
+6. **`FastModel`** – declarative models
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ .. code-block:: python
+
+    from validatedata import FastModel, Rule
+
+     class User(FastModel):
+         name: str = Rule(min=3)
+         email: str = Rule("email")
+
+     user = User(name="Alice", email="alice@example.com")
+
+7. **Auto‑validation of modules / packages**
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python

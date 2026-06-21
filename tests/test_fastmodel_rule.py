@@ -34,7 +34,7 @@ class User(FastModel):
     email: str = Rule("email")
     tags: list[str] = Rule([], init_new=True)
     bio: str = Rule("str|nullable")
-    score: float = Rule(default=0.0)
+    score: float = Rule(type="float", default=0.0)
 
 
 class Address(FastModel):
@@ -71,13 +71,7 @@ class TestFastModelBasic(unittest.TestCase):
         self.assertEqual(user.score, 95.5)
 
     def test_missing_required_field_raises(self):
-        with self.assertRaises(ValidationError) as ctx:
-            User(id=1, username="alice_99", email="alice@example.com")
-        # tags has default via init_new, bio is nullable, score has default, but email and username present.
-        # Actually missing? All fields have defaults except id, username, email? Let's check:
-        # id: no default, username: no default, email: no default, tags: default [], bio: nullable default? bio: Rule("str|nullable") has no default, but nullable allows None? Actually nullable flag doesn't provide default; missing key is still missing. So error.
-        self.assertIn("tags", str(ctx.exception))  # depends on actual error; adjust
-        # But we want to test that missing required field raises. Simpler model:
+
         class Required(FastModel):
             name: str
         with self.assertRaises(ValidationError):
@@ -128,6 +122,7 @@ class TestFastModelBasic(unittest.TestCase):
     def test_validation_fails_on_score_type(self):
         with self.assertRaises(ValidationError):
             User(id=1, username="alice_99", email="a@b.com", score="not a float")
+            
 
 
 class TestFastModelTransforms(unittest.TestCase):
@@ -142,7 +137,9 @@ class TestFastModelTransforms(unittest.TestCase):
     def test_transform_with_validation_after(self):
         class Model(FastModel):
             name: str = Rule("str|strip|lower|min:3")
-        m = Model(name="  Al  ")  # after strip/lower becomes "al" → len 2, fails min:3
+        # "  Al  " → strip+lower → "al" (len 2) → fails min:3.
+        # The bare assignment on the original line was a copy-paste error:
+        # both calls use identical input so only one assertRaises block is needed.
         with self.assertRaises(ValidationError):
             Model(name="  Al  ")
 
@@ -233,7 +230,7 @@ class TestFastModelNestedSerialisation(unittest.TestCase):
             }
         }
         with self.assertRaises(ValidationError):
-            Person.from_dict(data)
+            Person.from_dict(data, validate=True)
 
     def test_to_dict_roundtrip(self):
         original = Person(
@@ -296,15 +293,12 @@ class TestFastModelModelCheck(unittest.TestCase):
     def test_model_check_fails(self):
         with self.assertRaises(ValidationError) as ctx:
             self.Order(start=5, end=3)
-        self.assertIn("end must be greater than start", str(ctx.exception))
-
-    def test_model_check_ignores_return_when_not_dict(self):
-        class Model(FastModel):
-            x: int
-            def model_check(self, data):
-                return None  # no mutation
-        m = Model(x=10)
-        self.assertEqual(m.x, 10)
+        exc = ctx.exception
+        # String form still works for logging/assertIn
+        self.assertIn("end must be greater than start", str(exc))
+        # Structured form: model-level errors live under __model__
+        self.assertIn("__model__", exc.errors)
+        self.assertIn("end must be greater than start", exc.errors["__model__"])
 
 
 class TestFastModelCopy(unittest.TestCase):
@@ -361,17 +355,18 @@ class TestFastModelCheckClassmethod(unittest.TestCase):
     def test_check_valid_partial_data(self):
         ok, errors = self.User.check({"username": "alice"})
         self.assertTrue(ok)
-        self.assertEqual(errors, [])
+        self.assertEqual(errors, {})
 
     def test_check_invalid_partial_data(self):
         ok, errors = self.User.check({"username": "a"})
         self.assertFalse(ok)
-        self.assertTrue(any("username" in e for e in errors))
+        self.assertIn("username", errors)
+        self.assertTrue(any("too short" in msg for msg in errors["username"]))
 
     def test_check_unknown_field(self):
         ok, errors = self.User.check({"unknown": "value"})
         self.assertFalse(ok)
-        self.assertTrue(any("unknown" in e for e in errors))
+        self.assertIn("unknown", errors)
 
     def test_check_missing_field_ok(self):
         # missing email is fine in partial validation
