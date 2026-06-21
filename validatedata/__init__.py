@@ -5,8 +5,10 @@ from .autovalidate import autovalidate
 from .autovalidate_package import autovalidate_package
 from .fast import validate_data_fast
 from .types import register_type, unregister_type, export_registered_checkers
+from .fastmodel import FastModel, Rule
+from .diagnose import diagnose
 
-__version__ = '0.6.1'
+__version__ = '0.6.2'
 
 __all__ = [
     'validate',
@@ -23,5 +25,8 @@ __all__ = [
     'validate_data_fast',
     'register_type',
     'unregister_type',
-    'export_registered_checkers'
+    'export_registered_checkers',
+    'diagnose',
+    'FastModel',
+    'Rule',
 ]

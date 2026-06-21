@@ -1,3 +1,5 @@
 pytest
 python-dateutil>=2.8.2
+typing_extensions>=4.0.0; python_version<'3.9'
+
 zipp>=3.19.1 # not directly required, pinned by Snyk to avoid a vulnerability

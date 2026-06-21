@@ -69,7 +69,8 @@ _RANGE_MSG_KEYS: Dict[Tuple[str, str], str] = {
 # ----------------------------------------------------------------------
 class _CompiledRule:
     __slots__ = ("fast_validator", "checks", "nullable", "type_name", "transform",
-                 "validator_names", "validator_args", "custom_msg", "non_strict")
+                 "validator_names", "validator_args", "custom_msg", "non_strict",
+                 "rule_str")
     def __init__(
         self,
         fast_validator: Callable[[Any], bool],
@@ -81,16 +82,19 @@ class _CompiledRule:
         validator_args: List[Any],
         custom_msg: Optional[str] = None,
         non_strict: bool = False,
+        rule_str: Optional[str] = None,
     ):
         self.fast_validator = fast_validator
         self.checks = checks
         self.nullable = nullable
         self.type_name = type_name
         self.transform = transform
-        self.validator_names = validator_names   # parallel to checks
+        self.validator_names = validator_names
         self.validator_args = validator_args
         self.custom_msg = custom_msg
-        self.non_strict = non_strict             # True when literal_eval coercion is in play
+        self.non_strict = non_strict
+        self.rule_str = rule_str
+
 
 # ----------------------------------------------------------------------
 # Compile a pipe rule string into a _CompiledRule
@@ -145,6 +149,7 @@ def _compile_pipe_rule_to_struct(rule_str: str) -> _CompiledRule:
         validator_args=validator_args,
         custom_msg=custom_msg,
         non_strict=non_strict,
+        rule_str=rule_str, 
     )
 
 # ----------------------------------------------------------------------
@@ -203,10 +208,15 @@ def _message_for_check_at_index(
         if arg:
             # For between, arg may be like "1,10" – but the stored arg is the raw string.
             if validator_name == "between" and isinstance(arg, str) and "," in arg:
+                msg_key = _RANGE_MSG_KEYS.get(("between", category), "string_not_in_range")
+                template = _msg.get(msg_key, "value out of range")
                 lo, hi = arg.split(",", 1)
                 template = template.replace("{min}", lo.strip()).replace("{max}", hi.strip())
             else:
-                template = template.replace("{min}", arg).replace("{max}", arg)
+                msg_key = _RANGE_MSG_KEYS.get((validator_name, category), "string_not_in_range")
+                template = _msg.get(msg_key, "value out of range")
+                if arg:
+                    template = template.replace("{min}", arg).replace("{max}", arg)
         return template
 
     # All other validators (length, in, contains, re, etc.)
@@ -225,10 +235,15 @@ def _validate_value_with_messages(
     value: Any,
     rule_struct: _CompiledRule,
     field_name: Optional[str] = None,
-) -> Tuple[bool, List[str]]:
+) -> Tuple[bool, List[str], Any]:
+    """
+    Returns (ok, errors, transformed_value).
+    transformed_value is the value after transform (if any), or the original value.
+    """
     # Fast path
     if rule_struct.fast_validator(value):
-        return True, []
+        # fast path includes transform inside compiled callable
+        return True, [], value
 
     # Slow path – run checks one by one
     transformed = value
@@ -237,16 +252,15 @@ def _validate_value_with_messages(
             transformed = rule_struct.transform(value)
         except Exception:
             msg = "transform failed"
-            return False, [f"{field_name}: {msg}" if field_name else msg]
+            return False, [f"{field_name}: {msg}" if field_name else msg], value
 
     if transformed is None:
         if rule_struct.nullable:
-            return True, []
-        return False, [f"{field_name}: value is missing" if field_name else "value is missing"]
+            return True, [], None
+        return False, [f"{field_name}: value is missing" if field_name else "value is missing"], value
 
-    # OPT 4: Bind frequently accessed slot attributes to locals before the loop.
-    checks     = rule_struct.checks
-    type_name  = rule_struct.type_name
+    checks = rule_struct.checks
+    type_name = rule_struct.type_name
 
     errors = []
     for i, check in enumerate(checks):
@@ -263,7 +277,7 @@ def _validate_value_with_messages(
                 msg = f"{field_name}: {msg}"
             errors.append(msg)
             break
-    return len(errors) == 0, errors
+    return len(errors) == 0, errors, transformed
 
 # ----------------------------------------------------------------------
 # Caches
@@ -351,11 +365,11 @@ def _validate_mapping_with_messages(
         for field, cr in field_rules.items():
             value = data.get(field)
             if isinstance(cr, _CompiledRule):
-                ok, errs = _validate_value_with_messages(value, cr, field)
+                ok, errs, transformed_val = _validate_value_with_messages(value, cr, field)
                 if not ok:
                     errors.extend(errs)
                 else:
-                    transformed[field] = value
+                    transformed[field] = transformed_val
             elif isinstance(cr, tuple):  # nested dict
                 if not isinstance(value, dict):
                     errors.append(f"{field}: expected dict, got {type(value).__name__}")
@@ -372,7 +386,7 @@ def _validate_mapping_with_messages(
         for field, cr in field_rules.items():
             value = data.get(field)
             if isinstance(cr, _CompiledRule):
-                ok, errs = _validate_value_with_messages(value, cr, field)
+                ok, errs, _ = _validate_value_with_messages(value, cr, field)
                 if not ok:
                     errors.extend(errs)
             elif isinstance(cr, tuple):  # nested dict
@@ -412,8 +426,8 @@ def validate_data_fast(
 
     if isinstance(rule, str):
         cr = _get_compiled_rule(rule)
-        ok, errors = _validate_value_with_messages(data, cr)
-        return ValidationResult(ok, errors, data if mutate else None)
+        ok, errors, transformed = _validate_value_with_messages(data, cr)
+        return ValidationResult(ok, errors, transformed if mutate else None)
 
     if isinstance(rule, dict):
         ok, errors, transformed = _validate_mapping_with_messages(data, rule, mutate)
@@ -443,5 +457,8 @@ class ValidationResult:
 def _clear_fast_caches():
     _get_compiled_rule.cache_clear()
     _get_compiled_dict_rule.cache_clear()
+    
+    from validatedata.diagnose import _DIAG_CACHE
+    _DIAG_CACHE.clear()
 
 register_cache_clear_callback(_clear_fast_caches)
