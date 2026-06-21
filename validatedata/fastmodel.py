@@ -22,7 +22,8 @@ Serialisation / deserialisation
 """
 from __future__ import annotations
 
-from typing import Annotated, Any, Callable, ClassVar, Dict, List, Optional, Tuple, Type, get_args, get_origin, get_type_hints, Mapping
+import sys
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple, Type, get_args, get_origin, get_type_hints, Mapping
 
 from .rule import Rule, _MISSING
 from . import fast as _fast
@@ -30,6 +31,11 @@ from .engine import ValidationError
 from .compiled import validator
 from . import diagnose as _diagnose
 
+
+if sys.version_info >= (3, 9):
+    from typing import Annotated
+else:
+    from typing_extensions import Annotated
 
 def _diag_to_field_messages(diag: dict) -> tuple[bool, list[str]]:
     """Extract bare message strings from a diagnose() result.

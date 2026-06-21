@@ -15,6 +15,7 @@ license = "MIT"
 requires-python = ">=3.8"
 dependencies = [
     "python-dateutil",
+    "typing_extensions>=4.0.0; python_version<'3.9'",
 ]
 keywords = ["validate", "data", "validation"]
 classifiers = [
