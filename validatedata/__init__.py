@@ -8,7 +8,7 @@ from .types import register_type, unregister_type, export_registered_checkers
 from .fastmodel import FastModel, Rule
 from .diagnose import diagnose
 
-__version__ = '0.6.3'
+__version__ = '0.6.4'
 
 __all__ = [
     'validate',
