@@ -113,8 +113,8 @@ package‑wide validation.
     from validatedata import FastModel, Rule
 
      class User(FastModel):
-         name: str = Rule(min=3)
-         email: str = Rule("email")
+         name: str = Rule(type="str", min=3)
+         email: str = Rule(type="email")
 
      user = User(name="Alice", email="alice@example.com")
 

@@ -86,10 +86,10 @@ For structured data that you reuse across your application, `FastModel` gives yo
 from validatedata import FastModel, Rule
 
 class User(FastModel):
-    id: int
-    username: str = Rule(min=3, max=32, pattern=r'^[a-z0-9_]+$')
+    id: int = Rule(type="int")
+    username: str = Rule(type="str", min=3, max=32, pattern=r'^[a-z0-9_]+$')
     email: str = Rule("email")
-    tags: list[str] = Rule(default=[], init_new=True, max_items=20)
+    tags: list[str] = Rule(type="list", default=[], init_new=True, max_items=20)
 
     def model_check(self, data: dict):
         # cross‑field validation
@@ -102,7 +102,6 @@ user = User(id=1, username="alice", email="alice@example.com")
 # Serialise to dict
 data = user.to_dict()   # {'id': 1, 'username': 'alice', ...}
 
-# Reconstruct from dict (fast bypass or full validation)
 user2 = User.from_dict(data) # returns None if data is invalid. set validate=True to throw exceptions
 ```
 FastModel combines the speed of compiled rules with the convenience of dataclasses – ideal for API models and configuration objects

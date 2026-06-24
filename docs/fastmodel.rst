@@ -17,7 +17,7 @@ Define a model by subclassing `FastModel` and annotating fields with types. Use 
    from validatedata import FastModel, Rule
 
    class User(FastModel):
-       id: int
+       id: int = Rule(type="int")
        username: str = Rule(min=3, max=32, pattern=r'^[a-z0-9_]+$')
        email: str = Rule("email")          # pipe syntax works too
        tags: list[str] = Rule(default=[], init_new=True, max_items=20)
