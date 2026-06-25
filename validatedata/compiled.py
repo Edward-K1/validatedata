@@ -3,6 +3,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import re
+import time
 import uuid as uuid_lib
 
 from ast import literal_eval
@@ -1090,3 +1091,422 @@ def validator(rule: str | dict, codegen=True) -> Callable[[Any], bool]:
 
     _cache_set(cache_key, fn)
     return fn
+
+
+
+# ---------------------------------------------------------------------------
+# Ultra-fused complexity budget
+# ---------------------------------------------------------------------------
+
+_ULTRA_MAX_TOP_FIELDS:   int = 30
+_ULTRA_MAX_NESTED_FIELDS: int = 20
+_ULTRA_MAX_TOP_BYTES:    int = 800
+_ULTRA_MAX_NESTED_BYTES: int = 800
+
+# ---------------------------------------------------------------------------
+# Ultra-fused type categories
+# ---------------------------------------------------------------------------
+
+_ULTRA_NATIVE_TYPES: frozenset[str] = frozenset({
+    "str", "int", "float", "bool", "dict", "list", "set", "tuple",
+})
+
+_ULTRA_REGEX_TYPES: dict[str, str] = {
+    "email":  "_RE_email",
+    "url":    "_RE_url",
+    "slug":   "_RE_slug",
+    "semver": "_RE_semver",
+    "phone":  "_RE_phone",
+}
+
+_ULTRA_FUNC_TYPES: dict[str, str] = {
+    "ip":    "_tc_ip",
+    "uuid":  "_tc_uuid",
+    "date":  "_tc_date",
+    "color": "_tc_color",
+    "prime": "_tc_prime",
+}
+
+_ULTRA_ARITH_INLINE: dict[str, str] = {
+    "even": "isinstance({v}, int) and not isinstance({v}, bool) and {v} % 2 == 0",
+    "odd":  "isinstance({v}, int) and not isinstance({v}, bool) and {v} % 2 == 1",
+}
+
+_ULTRA_ALL_INLINEABLE_TYPES: frozenset[str] = (
+    _ULTRA_NATIVE_TYPES
+    | frozenset(_ULTRA_REGEX_TYPES)
+    | frozenset(_ULTRA_FUNC_TYPES)
+    | frozenset(_ULTRA_ARITH_INLINE)
+)
+
+# ---------------------------------------------------------------------------
+# Ultra-fused modifier categories
+# ---------------------------------------------------------------------------
+
+_ULTRA_TRANSFORM_INLINE: dict[str, str] = {
+    "strip":  "{v}.strip()",
+    "lstrip": "{v}.lstrip()",
+    "rstrip": "{v}.rstrip()",
+    "lower":  "{v}.lower()",
+    "upper":  "{v}.upper()",
+    "title":  "{v}.title()",
+}
+
+_ULTRA_RANGE_MODIFIERS: frozenset[str] = frozenset({"min", "max", "between", "length"})
+
+_ULTRA_IGNORED_MODIFIERS: frozenset[str] = frozenset({"msg", "strict"})
+
+_ULTRA_UNSUPPORTED_MODIFIERS: frozenset[str] = frozenset({
+    "in", "not_in", "contains", "starts_with", "ends_with",
+    "re", "unique", "format", "region", "of",
+})
+
+_ULTRA_LEN_TYPES: frozenset[str] = frozenset({
+    "str", "email", "url", "uuid", "ip", "slug", "semver",
+    "phone", "date", "color", "list", "dict", "set", "tuple",
+})
+
+_ULTRA_REGEX_FAST_REJECT: dict[str, str] = {
+    "email":  "'@' in {v}",
+    "url":    "':' in {v}",
+    "phone":  "{v}.startswith('+')",
+    "semver": "{v}.count('.') == 2",
+}
+
+
+# ---------------------------------------------------------------------------
+# Ultra-fused eligibility check
+# ---------------------------------------------------------------------------
+
+def _is_ultra_simple_schema(
+    schema: dict,
+    *,
+    _depth: int = 0,
+    _max_fields: int = _ULTRA_MAX_TOP_FIELDS,
+    _max_bytes: int = _ULTRA_MAX_TOP_BYTES,
+) -> bool:
+    """Return True when every rule in *schema* can be ultra-fused."""
+    if _depth > 5:
+        return False
+    if not isinstance(schema, dict):
+        return False
+
+    if len(schema) > _max_fields:
+        return False
+
+    try:
+        if len(json.dumps(schema, separators=(",", ":"))) > _max_bytes:
+            return False
+    except (TypeError, ValueError):
+        return False
+
+    nested_max_fields = _ULTRA_MAX_NESTED_FIELDS
+    nested_max_bytes  = _ULTRA_MAX_NESTED_BYTES
+
+    for rule in schema.values():
+        if isinstance(rule, dict):
+            if not _is_ultra_simple_schema(
+                rule,
+                _depth=_depth + 1,
+                _max_fields=nested_max_fields,
+                _max_bytes=nested_max_bytes,
+            ):
+                return False
+            continue
+
+        if not isinstance(rule, str):
+            return False
+
+        tokens = rule.split("|")
+        type_tok = tokens[0].strip()
+
+        if type_tok not in _ULTRA_ALL_INLINEABLE_TYPES:
+            return False
+
+        for tok in tokens[1:]:
+            key = tok.split(":")[0].strip()
+            if key in _ULTRA_UNSUPPORTED_MODIFIERS:
+                return False
+            if (
+                key not in _ULTRA_RANGE_MODIFIERS
+                and key not in _ULTRA_TRANSFORM_INLINE
+                and key not in _ULTRA_IGNORED_MODIFIERS
+                and key != "nullable"
+            ):
+                return False
+
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Ultra-fused per-rule compiler
+# ---------------------------------------------------------------------------
+
+def _ultra_compile_rule_exprs(
+    type_tok: str,
+    modifier_tokens: list[str],
+    var: str,
+) -> tuple[bool, str | None, list[str]]:
+    """Parse modifier tokens and return (nullable, transform_expr, [bool_exprs])."""
+    nullable     = False
+    transforms   = []
+    min_val      = max_val = between_lo = between_hi = length_val = None
+
+    for tok in modifier_tokens:
+        key, _, val = tok.partition(":")
+        key = key.strip()
+        val = val.strip() if val else None
+
+        if key == "nullable":
+            nullable = True
+        elif key in _ULTRA_TRANSFORM_INLINE:
+            transforms.append(_ULTRA_TRANSFORM_INLINE[key])
+        elif key == "min":
+            min_val = val
+        elif key == "max":
+            max_val = val
+        elif key == "between":
+            if val:
+                parts = val.split(",", 1)
+                if len(parts) == 2:
+                    between_lo, between_hi = parts[0].strip(), parts[1].strip()
+        elif key == "length":
+            length_val = val
+
+    transform_expr: str | None = None
+    if transforms:
+        expr = var
+        for tmpl in transforms:
+            expr = tmpl.replace("{v}", expr)
+        transform_expr = expr
+
+    chk = transform_expr if transform_expr else var
+
+    if type_tok in _ULTRA_NATIVE_TYPES:
+        type_expr = f"isinstance({chk}, {type_tok})"
+    elif type_tok in _ULTRA_REGEX_TYPES:
+        ns_key = _ULTRA_REGEX_TYPES[type_tok]
+        fast_reject = _ULTRA_REGEX_FAST_REJECT.get(type_tok)
+        if fast_reject:
+            type_expr = (
+                f"isinstance({chk}, str) and "
+                f"{fast_reject.format(v=chk)} and "
+                f"{ns_key}.match({chk}) is not None"
+            )
+        else:
+            type_expr = f"isinstance({chk}, str) and {ns_key}.match({chk}) is not None"
+    elif type_tok in _ULTRA_FUNC_TYPES:
+        ns_key = _ULTRA_FUNC_TYPES[type_tok]
+        type_expr = f"{ns_key}({chk})"
+    else:
+        type_expr = _ULTRA_ARITH_INLINE[type_tok].replace("{v}", chk)
+
+    bool_exprs: list[str] = [type_expr]
+
+    use_len = type_tok in _ULTRA_LEN_TYPES
+
+    if between_lo is not None and between_hi is not None:
+        if use_len:
+            bool_exprs.append(f"{between_lo} <= len({chk}) <= {between_hi}")
+        else:
+            bool_exprs.append(f"{between_lo} <= {chk} <= {between_hi}")
+    else:
+        if min_val is not None and max_val is not None:
+            if use_len:
+                bool_exprs.append(f"{min_val} <= len({chk}) <= {max_val}")
+            else:
+                bool_exprs.append(f"{min_val} <= {chk} <= {max_val}")
+        elif min_val is not None:
+            bool_exprs.append(f"len({chk}) >= {min_val}" if use_len else f"{chk} >= {min_val}")
+        elif max_val is not None:
+            bool_exprs.append(f"len({chk}) <= {max_val}" if use_len else f"{chk} <= {max_val}")
+
+    if length_val is not None:
+        if use_len:
+            bool_exprs.append(f"len({chk}) == {length_val}")
+        else:
+            bool_exprs.append(f"{chk} == {length_val}")
+
+    return nullable, transform_expr, bool_exprs
+
+
+# ---------------------------------------------------------------------------
+# Ultra-fused code emitter
+# ---------------------------------------------------------------------------
+
+def _ultra_emit_checks(
+    schema: dict,
+    lines: list[str],
+    indent: str,
+    data_var: str,
+    *,
+    _counter: list[int],
+) -> None:
+    """Append ultra-fused field-check lines for *schema* into *lines*."""
+    for field, rule in schema.items():
+        idx = _counter[0]
+        _counter[0] += 1
+        safe_field = repr(field)
+
+        if isinstance(rule, dict):
+            sub_var = f"_s{idx}"
+            lines.append(f"{indent}{sub_var} = {data_var}[{safe_field}]")
+            lines.append(f"{indent}if not isinstance({sub_var}, dict): return False")
+            _ultra_emit_checks(rule, lines, indent, sub_var, _counter=_counter)
+            continue
+
+        var = f"_v{idx}"
+        tokens = rule.split("|")
+        type_tok = tokens[0].strip()
+
+        nullable, transform_expr, bool_exprs = _ultra_compile_rule_exprs(
+            type_tok, tokens[1:], var
+        )
+
+        if nullable:
+            lines.append(f"{indent}{var} = {data_var}.get({safe_field})")
+            lines.append(f"{indent}if {var} is not None:")
+            inner = indent + "    "
+            if transform_expr:
+                tmp = f"_t{idx}"
+                lines.append(f"{inner}{tmp} = {transform_expr} if isinstance({var}, str) else {var}")
+                patched = [e.replace(transform_expr, tmp) for e in bool_exprs]
+                combined = " and ".join(patched)
+            else:
+                combined = " and ".join(bool_exprs)
+            lines.append(f"{inner}if not ({combined}): return False")
+        else:
+            if transform_expr:
+                tmp = f"_t{idx}"
+                lines.append(f"{indent}{var} = {data_var}[{safe_field}]")
+                lines.append(f"{indent}{tmp} = {transform_expr} if isinstance({var}, str) else {var}")
+                patched = [e.replace(transform_expr, tmp) for e in bool_exprs]
+                combined = " and ".join(patched)
+                lines.append(f"{indent}if not ({combined}): return False")
+            else:
+                uses = sum(expr.count(var) for expr in bool_exprs)
+                if uses == 1:
+                    fused_exprs = [e.replace(var, f"{data_var}[{safe_field}]", 1) for e in bool_exprs]
+                    combined = " and ".join(fused_exprs)
+                    lines.append(f"{indent}if not ({combined}): return False")
+                else:
+                    lines.append(f"{indent}{var} = {data_var}[{safe_field}]")
+                    combined = " and ".join(bool_exprs)
+                    lines.append(f"{indent}if not ({combined}): return False")
+
+
+# ---------------------------------------------------------------------------
+# Ultra-fused function factory
+# ---------------------------------------------------------------------------
+
+def _make_ultra_fused_validator(schema: dict) -> Callable[[Any], bool]:
+    """Emit, compile, and exec a fully inlined dict-validator for *schema*."""
+    lines: list[str] = [
+        "def _ultra_fn(data):",
+        "    if not isinstance(data, dict): return False",
+        "    try:",
+    ]
+    _ultra_emit_checks(schema, lines, indent="        ", data_var="data", _counter=[0])
+    lines.append("        return True")
+    lines.append("    except KeyError: return False")
+
+    source = "\n".join(lines)
+
+    ns: dict[str, Any] = {}
+
+    used_types: set[str] = set()
+    def _collect_types(s: dict) -> None:
+        for rule in s.values():
+            if isinstance(rule, dict):
+                _collect_types(rule)
+            elif isinstance(rule, str):
+                used_types.add(rule.split("|")[0].strip())
+    _collect_types(schema)
+
+    if used_types & frozenset(_ULTRA_REGEX_TYPES):
+        _regex_map = {
+            "_RE_email":  _EMAIL_RE,
+            "_RE_url":    _URL_RE,
+            "_RE_slug":   _SLUG_RE,
+            "_RE_semver": _SEMVER_RE,
+            "_RE_phone":  _PHONE_E164_RE,
+        }
+        for type_name, ns_key in _ULTRA_REGEX_TYPES.items():
+            if type_name in used_types:
+                ns[ns_key] = _regex_map[ns_key]
+
+    if used_types & frozenset(_ULTRA_FUNC_TYPES):
+        _func_map = {
+            "_tc_ip":    _tc_ip,
+            "_tc_uuid":  _tc_uuid,
+            "_tc_date":  _tc_date,
+            "_tc_color": _is_valid_color,
+            "_tc_prime": _is_prime,
+        }
+        for type_name, ns_key in _ULTRA_FUNC_TYPES.items():
+            if type_name in used_types:
+                ns[ns_key] = _func_map[ns_key]
+
+    exec(compile(source, f"<ultra_fused_n={len(schema)}>", "exec"), ns)  # noqa: S102
+    fn = ns["_ultra_fn"]
+    return fn
+
+
+# ---------------------------------------------------------------------------
+# Public entry point — fast_validator()
+# ---------------------------------------------------------------------------
+
+def fast_validator(
+    schema: dict,
+    *,
+    codegen: bool = True,
+    compile_timeout: float = 0.5,
+) -> Callable[[Any], bool]:
+    """Return the fastest available validator for *schema*.
+
+    When ``codegen=True`` (default), the ultra-fused path is attempted first:
+    a fully inlined function is emitted via ``exec`` with no loop overhead.
+    If the schema is not ultra-eligible or compilation exceeds
+    ``compile_timeout``, the regular codegen path (``validator(schema,
+    codegen=True)``) is used as the first fallback.
+
+    When ``codegen=False``, the ultra-fused path is skipped entirely and the
+    interpreter-loop path (``validator(schema, codegen=False)``) is used
+    directly — zero compile overhead, easier to debug, picklable.
+
+    Parameters
+    ----------
+    schema:
+        A dict mapping field names to pipe-rule strings or nested dicts.
+    codegen:
+        When True (default), prefer the ultra-fused emitted function and fall
+        back to the regular codegen path only when necessary.
+        When False, skip all codegen and use the loop-based validator.
+    compile_timeout:
+        Wall-clock seconds budget for ultra-fuse compilation (default 500 ms).
+        Only consulted when ``codegen=True``.
+
+    Returns
+    -------
+    Callable[[Any], bool]
+        A single-argument callable: returns True when input is valid.
+    """
+    if not isinstance(schema, dict):
+        raise TypeError(
+            f"fast_validator expects a dict schema, got {type(schema).__name__!r}"
+        )
+
+    if codegen:
+        start = time.perf_counter()
+        try:
+            if _is_ultra_simple_schema(schema):
+                fn = _make_ultra_fused_validator(schema)
+                if (time.perf_counter() - start) <= compile_timeout:
+                    return fn
+        except Exception:
+            pass
+        # Ultra-fused path was ineligible or timed out — fall back to regular codegen.
+        return validator(schema, codegen=True)
+
+    # codegen=False: skip all emit/exec work, use the plain loop path.
+    return validator(schema, codegen=codegen)
