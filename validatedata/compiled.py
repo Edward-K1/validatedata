@@ -1678,8 +1678,8 @@ def _ultra_emit_checks(
         tokens = rule.split("|")
         type_tok = tokens[0].strip()
 
-        nullable, transform_expr, bool_exprs = _ultra_compile_rule_exprs(
-            type_tok, tokens[1:], var
+        nullable, transform_expr, bool_exprs, ns_vars = _ultra_compile_rule_exprs(
+            type_tok, tokens[1:], var, idx
         )
 
         if nullable:

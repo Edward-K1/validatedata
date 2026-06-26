@@ -29,7 +29,7 @@ Validatedata gives you expressive, inline validation rules without defining mode
 | Dict  (valid) | 1.1373s | 1.2550s | 4.2318s |  4.6816s|
 | Dict (invalid) | 0.2359s | 1.1655s | 4.6230s | 3.0652s |
 
-> [benchmark](https://github.com/Edward-K1/validatedata/benchmark.py)
+> [benchmark](https://github.com/Edward-K1/validatedata/blob/main/benchmark.py)
 
 
 ## Fast validation with `validator()`
