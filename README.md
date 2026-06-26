@@ -6,7 +6,7 @@ An easier way to validate data in python.
 
 **Seven validation modes – one simple syntax.**
 
-1. **`validator()`** – compile rules into ultra‑fast boolean callables. Ideal for high‑throughput streaming.
+1. **`validator()`** – One word: speed. Ideal for high‑throughput streaming. msgspec, handwritten code, and this function will compete for first place.
 2. **`FastModel`** – declarative, typed models with compiled validation, rich error messages, and serialization.
 3. **`validate_data_fast()`** – compiled speed with **full error messages** (preview of the next‑gen engine – will eventually replace `validate_data`).
 4. **`validate_data()`** – general‑purpose validation with detailed errors, nested structures, and optional mutation.
@@ -23,18 +23,19 @@ Validatedata gives you expressive, inline validation rules without defining mode
 - **Custom type registration** – add your own type checkers with `register_type` / `unregister_type`.
 
 
-### Benchmarks (3 million repetitions)
+### Benchmark (1 million repetitions)
 | Test | validatedata (validator) | msgspec | pydantic | fastjsonschema |
 |------|---------------------|-------------|---------|----------|
-| Dict  (valid) | 5.6091s | 2.6221s | 11.9899s |  14.6283s|
-| Dict (invalid) | 0.9845s | 3.5143s | 13.9074s | 9.3520s |
+| Dict  (valid) | 1.1373s | 1.2550s | 4.2318s |  4.6816s|
+| Dict (invalid) | 0.2359s | 1.1655s | 4.6230s | 3.0652s |
+
+> [benchmark](https://github.com/Edward-K1/validatedata/benchmark.py)
 
 
 ## Fast validation with `validator()`
 
 When you only need a **boolean pass/fail** result (no error messages), use `validator()`. It compiles a rule into a callable that returns `True` or `False` with minimal overhead. Its faster than Pydantic v2 and msgspec on invalid data dicts.
 
-The performance advantage of the *validator* function on invalid data comes from early‑exit optimisations. 
 
 ```python
 from validatedata import validator

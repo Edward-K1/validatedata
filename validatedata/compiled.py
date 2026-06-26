@@ -364,6 +364,34 @@ _ITEM_TYPE_CHECK: dict[str, Callable[[Any], bool]] = {
     'int': lambda v: isinstance(v, int) and not isinstance(v, bool),
 }
 
+_ULTRA_LEN_BASED: frozenset[str] = frozenset({
+    "str", "email", "url", "uuid", "ip", "slug", "semver", "phone",
+    "date", "color", "list", "dict", "set", "tuple",
+})
+
+_ULTRA_TYPE_EXPRS: dict[str, tuple[str, dict[str, Any] | None]] = {
+    'str':    ('isinstance({v}, str)', None),
+    'int':    ('isinstance({v}, int) and not isinstance({v}, bool)', None),
+    'float':  ('isinstance({v}, float)', None),
+    'bool':   ('isinstance({v}, bool)', None),
+    'dict':   ('isinstance({v}, dict)', None),
+    'list':   ('isinstance({v}, list)', None),
+    'set':    ('isinstance({v}, set)', None),
+    'tuple':  ('isinstance({v}, tuple)', None),
+    'email':  ('_EMAIL_RE.match(str({v})) is not None', None),
+    'url':    ('_RE_url.match(str({v})) is not None', {'_RE_url': _URL_RE}),
+    'slug':   ('_RE_slug.match(str({v})) is not None', {'_RE_slug': _SLUG_RE}),
+    'semver': ('_RE_semver.match(str({v})) is not None', {'_RE_semver': _SEMVER_RE}),
+    'phone':  ('_RE_phone.match(str({v})) is not None', {'_RE_phone': _PHONE_E164_RE}),
+    'ip':     ('_tc_ip({v})', {'_tc_ip': _tc_ip}),
+    'uuid':   ('_tc_uuid({v})', {'_tc_uuid': _tc_uuid}),
+    'date':   ('_tc_date({v})', {'_tc_date': _tc_date}),
+    'color':  ('_is_valid_color({v})', {'_is_valid_color': _is_valid_color}),
+    'even':   ('isinstance({v}, int) and not isinstance({v}, bool) and {v} % 2 == 0', None),
+    'odd':    ('isinstance({v}, int) and not isinstance({v}, bool) and {v} % 2 == 1', None),
+    'prime':  ('_is_prime({v})', {'_is_prime': _is_prime}),
+}
+
 
 # ---------------------------------------------------------------------------
 # Build the final type-check callable given compile-time parameters.
@@ -821,6 +849,12 @@ def _make_callable(
     # object on every call — the dominant overhead vs handwritten validators.
     # The 4+ case falls back to all(); by then per-call work dominates anyway.
     n = len(checks)
+    
+    # Ultra-fast path: 1 check, no nullable, no transform.
+    # Return the closure directly to save a Python call frame.
+    if n == 1 and not nullable and transform is None:
+        return checks[0]
+        
     if n == 1:
         c0 = checks[0]
         def _run(v: Any) -> bool: return c0(v)
@@ -1018,8 +1052,142 @@ def _make_dict_callable(
     exec(code, ns)  # noqa: S102  # NOSONAR: S5334 — interpolated values are integer loop indices only; field names and callables enter via ns, never as source text
     return ns["_fn"]  # type: ignore[return-value]
 
+import re as _re_module  # Ensure we have a local alias to avoid clashes
+def _ultra_compile_dict(schema: dict) -> Callable[[Any], bool]:
+    """Generate a fully inlined, single-frame validator for simple schemas.
+
+    Interleaves field extraction and checking so that on invalid input,
+    only the fields up to the first failure are extracted — matching the
+    performance characteristics of handwritten manual validation.
+
+    Handles nested dicts by recursing without increasing indentation,
+    keeping the entire block inside a single try/except.
+    """
+    ns: dict[str, Any] = {
+        "_EMAIL_RE": _EMAIL_RE,
+    }
+
+    lines: list[str] = ["def _fn(data):"]
+    lines.append("    if not isinstance(data, dict): return False")
+    lines.append("    try:")
+
+    _counter = [0]
+
+    def _new_var() -> str:
+        _counter[0] += 1
+        return f"_v{_counter[0]}"
+        
 
 
+    def _build_exprs(var: str, type_tok: str, modifiers: list[str]) -> list[str]:
+        exprs = []
+    
+        # Determine if this is a len-based or value-based type for range checks.
+        _is_parameterized = _PARAMETERIZED_RE.match(type_tok) is not None
+        _use_len = type_tok in _ULTRA_LEN_BASED or _is_parameterized
+    
+        # Type check — always first for short-circuit safety
+        if _is_parameterized:
+            m_p = _PARAMETERIZED_RE.match(type_tok)
+            outer = m_p.group(1)
+            inner_names = [t.strip() for t in m_p.group(2).split(",")]
+            outer_py = outer  # "list", "tuple", "set" are valid Python builtins
+            if len(inner_names) == 1:
+                inner = inner_names[0]
+                if inner == "int":
+                    inner_expr = f"isinstance(i, int) and not isinstance(i, bool)"
+                elif inner in ("str", "float", "bool"):
+                    inner_expr = f"isinstance(i, {inner})"
+                else:
+                    # Non-native item type: use _ITEM_TYPE_CHECK via a captured callable
+                    nm = f"_ic_{_counter[0]}"
+                    ns[nm] = _ITEM_TYPE_CHECK.get(inner) or _TYPE_CHECK.get(inner)
+                    inner_expr = f"{nm}(i)"
+                exprs.append(f"isinstance({var}, {outer_py}) and all({inner_expr} for i in {var})")
+            else:
+                # Union item types
+                checkers_nm = f"_ics_{_counter[0]}"
+                ns[checkers_nm] = tuple(_ITEM_TYPE_CHECK[n] for n in inner_names)
+                exprs.append(
+                    f"isinstance({var}, {outer_py}) and "
+                    f"all(any(_c(i) for _c in {checkers_nm}) for i in {var})"
+                )
+        else:
+            type_info = _ULTRA_TYPE_EXPRS.get(type_tok)
+            if type_info is None:
+                raise TypeError(f'{type_tok!r} is not a supported type for ultra compilation')
+            template, ns_additions = type_info
+            if ns_additions:
+                ns.update(ns_additions)
+            exprs.append(template.format(v=var))
+    
+        for tok in modifiers:
+            key, _, val = tok.partition(":")
+            key = key.strip()
+            val = val.strip() if val else None
+    
+            if key in ("strict", "nullable", "msg"):
+                continue
+            elif key == "in" and val:
+                nm = f"_o{_counter[0]}"
+                ns[nm] = frozenset(x.strip() for x in val.split(","))
+                exprs.append(f"{var} in {nm}")
+            elif key == "not_in" and val:
+                nm = f"_e{_counter[0]}"
+                ns[nm] = frozenset(x.strip() for x in val.split(","))
+                exprs.append(f"{var} not in {nm}")
+            elif key == "re" and val:
+                nm = f"_r{_counter[0]}"
+                ns[nm] = _re_module.compile(val)
+                exprs.append(f"{nm}.match({var}) is not None")
+            elif key == "between" and val:
+                parts = val.split(",")
+                if len(parts) == 2:
+                    lo, hi = parts[0].strip(), parts[1].strip()
+                    if _use_len:
+                        exprs.append(f"{lo} <= len({var}) <= {hi}")
+                    else:
+                        exprs.append(f"{lo} <= {var} <= {hi}")
+            elif key in ("min", "max", "length") and val:
+                if _use_len:
+                    if key == "min": exprs.append(f"len({var}) >= {val}")
+                    elif key == "max": exprs.append(f"len({var}) <= {val}")
+                    elif key == "length": exprs.append(f"len({var}) == {val}")
+                else:
+                    if key == "min": exprs.append(f"{var} >= {val}")
+                    elif key == "max": exprs.append(f"{var} <= {val}")
+    
+        return exprs
+
+    def _emit(d: dict, parent_var: str, indent: str):
+        for f, rule in d.items():
+            var = _new_var()
+            lines.append(f"{indent}{var} = {parent_var}[{f!r}]")
+            if isinstance(rule, dict):
+                # Guard: the nested value must itself be a dict
+                lines.append(f"{indent}if not isinstance({var}, dict): return False")
+                # Recurse at the SAME indentation level
+                _emit(rule, var, indent)
+            else:
+                tokens = rule.split("|")
+                type_tok = tokens[0].strip()
+                exprs = _build_exprs(var, type_tok, tokens[1:])
+                check = " and ".join(exprs) if exprs else "True"
+                lines.append(f"{indent}if not ({check}): return False")
+
+    # We are inside the try: block, so use 8 spaces for the body
+    _emit(schema, "data", "        ")
+
+    # Guard against empty schemas which would leave `try:` empty
+    if len(lines) == 3:
+        lines.append("        pass")
+
+    lines.append("    except (KeyError, TypeError): return False")
+    lines.append("    return True")
+
+    code = compile("\n".join(lines), "<ultra_dict_validator>", "exec")
+    exec(code, ns)
+    return ns["_fn"]
 
 # ---------------------------------------------------------------------------
 # Public entry point
@@ -1086,8 +1254,12 @@ def validator(rule: str | dict, codegen=True) -> Callable[[Any], bool]:
         transform, checks, nullable = _compile_pipe_rule(rule)
         fn: Callable[[Any], bool] = _make_callable(transform, checks, nullable)
     else:
-        field_specs = _compile_dict_rule(rule, codegen=codegen)
-        fn = _make_dict_callable(field_specs, codegen=codegen)  # type: ignore[misc]
+        # Ultra-fused path: if schema is simple, generate one flat function
+        if codegen and _is_ultra_simple_schema(rule):
+            fn = _ultra_compile_dict(rule)
+        else:
+            field_specs = _compile_dict_rule(rule, codegen=codegen)
+            fn = _make_dict_callable(field_specs, codegen=codegen)  # type: ignore[misc]
 
     _cache_set(cache_key, fn)
     return fn
@@ -1157,8 +1329,11 @@ _ULTRA_RANGE_MODIFIERS: frozenset[str] = frozenset({"min", "max", "between", "le
 _ULTRA_IGNORED_MODIFIERS: frozenset[str] = frozenset({"msg", "strict"})
 
 _ULTRA_UNSUPPORTED_MODIFIERS: frozenset[str] = frozenset({
-    "in", "not_in", "contains", "starts_with", "ends_with",
-    "re", "unique", "format", "region", "of",
+    "unique", "format", "region", "of",
+})
+
+_ULTRA_PATTERN_MODIFIERS: frozenset[str] = frozenset({
+    "in", "not_in", "contains", "starts_with", "ends_with", "re"
 })
 
 _ULTRA_LEN_TYPES: frozenset[str] = frozenset({
@@ -1220,23 +1395,58 @@ def _is_ultra_simple_schema(
         tokens = rule.split("|")
         type_tok = tokens[0].strip()
 
-        if type_tok not in _ULTRA_ALL_INLINEABLE_TYPES:
+        # Determine valid modifiers based on type using .union() for type safety
+        m = _PARAMETERIZED_RE.match(type_tok)
+        if m:
+            outer = m.group(1)
+            inner = m.group(2).strip()
+            if outer not in ("list", "tuple", "set") or inner not in ("str", "int", "float", "bool"):
+                return False
+            valid_modifiers = _ULTRA_RANGE_MODIFIERS.union(
+                _ULTRA_IGNORED_MODIFIERS, {"nullable", "contains", "starts_with", "ends_with"}
+            )
+        elif type_tok in _ULTRA_NATIVE_TYPES:
+            if type_tok == "str":
+                valid_modifiers = _ULTRA_RANGE_MODIFIERS.union(
+                    _ULTRA_TRANSFORM_INLINE, _ULTRA_IGNORED_MODIFIERS, {"nullable"}, _ULTRA_PATTERN_MODIFIERS
+                )
+            elif type_tok in ("int", "float", "bool"):
+                valid_modifiers = _ULTRA_RANGE_MODIFIERS.union(
+                    _ULTRA_IGNORED_MODIFIERS, {"nullable", "in", "not_in", "re"}
+                )
+            elif type_tok in ("list", "tuple"):
+                valid_modifiers = _ULTRA_RANGE_MODIFIERS.union(
+                    _ULTRA_IGNORED_MODIFIERS, {"nullable", "contains", "starts_with", "ends_with"}
+                )
+            elif type_tok in ("set", "dict"):
+                valid_modifiers = _ULTRA_RANGE_MODIFIERS.union(
+                    _ULTRA_IGNORED_MODIFIERS, {"nullable", "contains"}
+                )
+        elif type_tok in _ULTRA_REGEX_TYPES or type_tok in _ULTRA_FUNC_TYPES:
+            # String-based extended types (email, url, uuid, ip, color, etc.)
+            valid_modifiers = _ULTRA_RANGE_MODIFIERS.union(
+                _ULTRA_TRANSFORM_INLINE, _ULTRA_IGNORED_MODIFIERS, {"nullable"}, _ULTRA_PATTERN_MODIFIERS
+            )
+        elif type_tok in _ULTRA_ARITH_INLINE:
+            # even, odd
+            valid_modifiers = _ULTRA_RANGE_MODIFIERS.union(
+                _ULTRA_IGNORED_MODIFIERS, {"nullable", "in", "not_in", "re"}
+            )
+        else:
             return False
 
         for tok in tokens[1:]:
             key = tok.split(":")[0].strip()
             if key in _ULTRA_UNSUPPORTED_MODIFIERS:
                 return False
-            if (
-                key not in _ULTRA_RANGE_MODIFIERS
-                and key not in _ULTRA_TRANSFORM_INLINE
-                and key not in _ULTRA_IGNORED_MODIFIERS
-                and key != "nullable"
-            ):
+            # Exclude nullable and transforms so we can safely use a single 
+            # flat try/except KeyError block for field extraction in _ultra_compile_dict
+            if key == "nullable" or key in _ULTRA_TRANSFORM_INLINE:
+                return False
+            if key not in valid_modifiers:
                 return False
 
     return True
-
 
 # ---------------------------------------------------------------------------
 # Ultra-fused per-rule compiler
@@ -1246,11 +1456,15 @@ def _ultra_compile_rule_exprs(
     type_tok: str,
     modifier_tokens: list[str],
     var: str,
-) -> tuple[bool, str | None, list[str]]:
-    """Parse modifier tokens and return (nullable, transform_expr, [bool_exprs])."""
-    nullable     = False
-    transforms   = []
-    min_val      = max_val = between_lo = between_hi = length_val = None
+    idx: int,
+) -> tuple[bool, str | None, list[str], dict[str, Any]]:
+    """Parse modifier tokens and return (nullable, transform_expr, [bool_exprs], ns_vars)."""
+    nullable = False
+    transforms = []
+    min_val = max_val = between_lo = between_hi = length_val = None
+    in_vals = not_in_vals = contains_vals = starts_with_val = ends_with_val = re_val = None
+    
+    ns_vars: dict[str, Any] = {}
 
     for tok in modifier_tokens:
         key, _, val = tok.partition(":")
@@ -1272,6 +1486,18 @@ def _ultra_compile_rule_exprs(
                     between_lo, between_hi = parts[0].strip(), parts[1].strip()
         elif key == "length":
             length_val = val
+        elif key == "in":
+            in_vals = val
+        elif key == "not_in":
+            not_in_vals = val
+        elif key == "contains":
+            contains_vals = val
+        elif key == "starts_with":
+            starts_with_val = val
+        elif key == "ends_with":
+            ends_with_val = val
+        elif key == "re":
+            re_val = val
 
     transform_expr: str | None = None
     if transforms:
@@ -1282,8 +1508,17 @@ def _ultra_compile_rule_exprs(
 
     chk = transform_expr if transform_expr else var
 
+    # --- Type Expression ---
     if type_tok in _ULTRA_NATIVE_TYPES:
         type_expr = f"isinstance({chk}, {type_tok})"
+    elif type_tok.startswith(('list[', 'tuple[', 'set[')):
+        outer = type_tok.split('[')[0]
+        inner = type_tok[:-1].split('[')[1].strip()
+        if inner == 'int':
+            inner_expr = "isinstance(i, int) and not isinstance(i, bool)"
+        else:
+            inner_expr = f"isinstance(i, {inner})"
+        type_expr = f"isinstance({chk}, {outer}) and all({inner_expr} for i in {chk})"
     elif type_tok in _ULTRA_REGEX_TYPES:
         ns_key = _ULTRA_REGEX_TYPES[type_tok]
         fast_reject = _ULTRA_REGEX_FAST_REJECT.get(type_tok)
@@ -1303,32 +1538,116 @@ def _ultra_compile_rule_exprs(
 
     bool_exprs: list[str] = [type_expr]
 
-    use_len = type_tok in _ULTRA_LEN_TYPES
+    use_len = type_tok in _ULTRA_LEN_TYPES or type_tok.startswith(('list[', 'tuple[', 'set['))
 
+    # --- Range Expressions ---
     if between_lo is not None and between_hi is not None:
         if use_len:
             bool_exprs.append(f"{between_lo} <= len({chk}) <= {between_hi}")
         else:
             bool_exprs.append(f"{between_lo} <= {chk} <= {between_hi}")
     else:
-        if min_val is not None and max_val is not None:
+        if min_val is not None:
             if use_len:
-                bool_exprs.append(f"{min_val} <= len({chk}) <= {max_val}")
+                bool_exprs.append(f"len({chk}) >= {min_val}")
             else:
-                bool_exprs.append(f"{min_val} <= {chk} <= {max_val}")
-        elif min_val is not None:
-            bool_exprs.append(f"len({chk}) >= {min_val}" if use_len else f"{chk} >= {min_val}")
-        elif max_val is not None:
-            bool_exprs.append(f"len({chk}) <= {max_val}" if use_len else f"{chk} <= {max_val}")
+                bool_exprs.append(f"{chk} >= {min_val}")
+        if max_val is not None:
+            if use_len:
+                bool_exprs.append(f"len({chk}) <= {max_val}")
+            else:
+                bool_exprs.append(f"{chk} <= {max_val}")
 
     if length_val is not None:
-        if use_len:
-            bool_exprs.append(f"len({chk}) == {length_val}")
+        bool_exprs.append(f"len({chk}) == {length_val}")
+
+    # --- Pattern Expressions ---
+    is_seq = type_tok in ("list", "tuple") or type_tok.startswith(('list[', 'tuple['))
+
+    # starts_with / ends_with
+    if starts_with_val is not None:
+        ns_name = f"_sw_{idx}"
+        val = starts_with_val
+        if is_seq:
+            parts = [p.strip() for p in val.split(',')]
+            if type_tok.startswith('list[int') or type_tok.startswith('tuple[int'):
+                parts = [int(p) for p in parts]
+            elif type_tok.startswith('list[float') or type_tok.startswith('tuple[float'):
+                parts = [float(p) for p in parts]
+            val = tuple(parts)
+        ns_vars[ns_name] = val
+        if is_seq:
+            bool_exprs.append(f"len({chk}) >= len({ns_name}) and {chk}[:len({ns_name})] == {ns_name}")
         else:
-            bool_exprs.append(f"{chk} == {length_val}")
+            bool_exprs.append(f"{chk}.startswith({ns_name})")
 
-    return nullable, transform_expr, bool_exprs
+    if ends_with_val is not None:
+        ns_name = f"_ew_{idx}"
+        val = ends_with_val
+        if is_seq:
+            parts = [p.strip() for p in val.split(',')]
+            if type_tok.startswith('list[int') or type_tok.startswith('tuple[int'):
+                parts = [int(p) for p in parts]
+            elif type_tok.startswith('list[float') or type_tok.startswith('tuple[float'):
+                parts = [float(p) for p in parts]
+            val = tuple(parts)
+        ns_vars[ns_name] = val
+        if is_seq:
+            bool_exprs.append(f"len({chk}) >= len({ns_name}) and {chk}[-len({ns_name}):] == {ns_name}")
+        else:
+            bool_exprs.append(f"{chk}.endswith({ns_name})")
 
+    # in / not_in (scalars only)
+    if in_vals is not None:
+        ns_name = f"_in_{idx}"
+        tokens = [t.strip() for t in in_vals.split(',')]
+        if type_tok == 'int' or type_tok in _ULTRA_ARITH_INLINE:
+            ns_vars[ns_name] = frozenset(int(t) for t in tokens)
+        elif type_tok == 'float':
+            ns_vars[ns_name] = frozenset(float(t) for t in tokens)
+        else:  # str and string-based
+            ns_vars[ns_name] = frozenset(tokens)
+        bool_exprs.append(f"{chk} in {ns_name}")
+
+    if not_in_vals is not None:
+        ns_name = f"_nin_{idx}"
+        tokens = [t.strip() for t in not_in_vals.split(',')]
+        if type_tok == 'int' or type_tok in _ULTRA_ARITH_INLINE:
+            ns_vars[ns_name] = frozenset(int(t) for t in tokens)
+        elif type_tok == 'float':
+            ns_vars[ns_name] = frozenset(float(t) for t in tokens)
+        else:
+            ns_vars[ns_name] = frozenset(tokens)
+        bool_exprs.append(f"{chk} not in {ns_name}")
+
+    # contains
+    if contains_vals is not None:
+        ns_name = f"_ct_{idx}"
+        if ',' in contains_vals:
+            items = tuple(t.strip() for t in contains_vals.split(','))
+            if type_tok.startswith('list[int') or type_tok.startswith('tuple[int') or type_tok.startswith('set[int'):
+                items = tuple(int(t) for t in items)
+            elif type_tok.startswith('list[float') or type_tok.startswith('tuple[float') or type_tok.startswith('set[float'):
+                items = tuple(float(t) for t in items)
+            ns_vars[ns_name] = items
+            bool_exprs.append(f"all(_x in {chk} for _x in {ns_name})")
+        else:
+            item = contains_vals
+            if type_tok.startswith('list[int') or type_tok.startswith('tuple[int') or type_tok.startswith('set[int'):
+                item = int(item)
+            elif type_tok.startswith('list[float') or type_tok.startswith('tuple[float') or type_tok.startswith('set[float'):
+                item = float(item)
+            ns_vars[ns_name] = item
+            bool_exprs.append(f"{ns_name} in {chk}")
+
+    # re (regex match)
+    if re_val is not None:
+        ns_name = f"_re_{idx}"
+        # Compile at codegen time for maximum runtime speed
+        ns_vars[ns_name] = re.compile(re_val)
+        bool_exprs.append(f"{ns_name}.match({chk}) is not None")
+
+    return nullable, transform_expr, bool_exprs, ns_vars
 
 # ---------------------------------------------------------------------------
 # Ultra-fused code emitter
