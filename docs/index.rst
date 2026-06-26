@@ -13,7 +13,7 @@ An easier way to validate data in python.
 
 **Seven validation modes – one simple syntax.**
 
- 1. **`validator()`** – compile rules into ultra‑fast boolean callables. Ideal for high‑throughput streaming.
+ 1. **`validator()`** – One word: speed. Ideal for high‑throughput streaming. msgspec, handwritten code, and this function will compete for first place.
  2. **`validate_data_fast()`** – same compiled speed but with **full error messages** (preview of the next‑gen engine).
  3. **`validate_data()`** – general‑purpose validation with detailed errors, nested structures, and optional mutation.
  4. **`@validate`** – decorator for function argument validation.

@@ -25,7 +25,7 @@ print(f"validatedata version: {getattr(vd, '__version__', 'unknown')}\n")
 # -----------------------------
 def get_reps_warmup():
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--reps", "-r", type=int, default=3_000_000,
+    parser.add_argument("--reps", "-r", type=int, default=10_000_00,
                         help="Number of repetitions")
     parser.add_argument("--warmup", type=int, default=5_000,
                         help="Warmup iterations")
@@ -291,7 +291,17 @@ class NestedStruct(msgspec.Struct):
 
 def msgspec_validate(data: Dict[str, Any]) -> bool:
     try:
-        msgspec.convert(data, type=NestedStruct)
+        # Structural + type validation
+        obj = msgspec.convert(data, type=NestedStruct)
+
+        # Additional rules
+        if not EMAIL_REGEX.match(obj.user.profile.email):
+            return False
+        if len(obj.user.profile.address.zip) != 5:
+            return False
+        if len(obj.user.name) < 1:
+            return False
+
         return True
     except Exception:
         return False
