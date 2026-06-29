@@ -55,7 +55,7 @@ def _get_compiled_modules():
 
 
 _MISSING = object()   # sentinel — "no value provided"
-
+_VALID_TRANSFORMS = frozenset({"strip", "lstrip", "rstrip", "lower", "upper", "title"})
 
 class Rule:
     """
@@ -68,7 +68,7 @@ class Rule:
     Parameters
     ----------
     rule:
-        Pipe string (``"str|min:3"``), dict schema, or ``None`` for unconstrained.
+        Pipe string (``"str|min:3"``), or ``None`` for unconstrained.
     default:
         Static default value. Copied via ``copy.deepcopy`` on each instantiation.
     default_factory:
@@ -88,7 +88,7 @@ class Rule:
 
     __slots__ = (
         "rule", "default", "_default_factory", "init_new", "nullable",
-        "kwargs", "_compiled", "_compiled_struct",
+        "kwargs", "_compiled", "_compiled_struct","transforms",
     )
 
     def __init__(
@@ -99,6 +99,7 @@ class Rule:
         default_factory: Optional[Callable] = None,
         init_new: bool = False,
         nullable: bool = False,
+        transforms: Any = None,
         **kwargs,
     ):
         # Bare mutable container as first positional → treat as default
@@ -119,6 +120,8 @@ class Rule:
         self.kwargs = dict(kwargs)
         self._compiled = None
         self._compiled_struct = None
+        self.transforms = transforms
+
 
         # Resolve default factory
         if default_factory is not None:
@@ -157,38 +160,108 @@ class Rule:
     # ------------------------------------------------------------------
 
     def _resolve_rule_string(self) -> Optional[str]:
-        """
-        Convert whatever was passed to a canonical pipe string, or None
-        for the fully-unconstrained (accept-anything) case.
-        """
+        """Convert whatever was passed to a canonical pipe string, or None."""
         base = self.rule
 
-        # Already a pipe string
+        if isinstance(base, dict):
+            raise ValueError(
+                "Dict rules must use Rule(fields={...}), not Rule({...}). "
+                "Bare dicts are treated as default values."
+            )
+
+        # Work on a copy of kwargs so this method is pure / idempotent.
+        kwargs = dict(self.kwargs)
+
+        # -------------------------------------------------------------
+        # 1. RESOLVE TRANSFORMS (Collect them, but don't place them yet)
+        # -------------------------------------------------------------
+        tf_parts = []
+        if self.transforms:
+            if isinstance(self.transforms, str):
+                tf_parts = [t.strip() for t in self.transforms.split("|") if t.strip()]
+            elif isinstance(self.transforms, (list, tuple)):
+                tf_parts = list(self.transforms)
+
+            for tf in tf_parts:
+                if tf not in _VALID_TRANSFORMS:
+                    raise ValueError(
+                        f"Unknown transform '{tf}'. "
+                        f"Supported: {sorted(_VALID_TRANSFORMS)}"
+                    )
+
+        # -------------------------------------------------------------
+        # 2. RESOLVE TYPE AND BASE PIPE STRING
+        # -------------------------------------------------------------
+        parts = []
         if isinstance(base, str):
-            rule_str = base
-        # Dict schema — serialise to JSON so compiled.validator can consume it
-        elif isinstance(base, dict):
-            import json
-            rule_str = json.dumps(base, sort_keys=True)
-        # kwargs-only shorthand
-        elif self.kwargs:
-            parts = []
-            t = self.kwargs.pop("type", None) if "type" in self.kwargs else None
-            # pattern kwarg → re: token
-            pattern = self.kwargs.pop("pattern", None)
+            tokens = base.split("|")
+            parts.append(tokens[0])  # Type token MUST be first
+
+            # Append other tokens, deduplicating against transforms kwarg
+            for tok in tokens[1:]:
+                if tok in _VALID_TRANSFORMS and tok in tf_parts:
+                    # Transform already in the pipe string — keep it at its
+                    # current pipe-string position and remove from tf_parts so
+                    # it isn't injected a second time in step 4.
+                    tf_parts.remove(tok)
+                parts.append(tok)
+
+        elif kwargs:
+            # Pop 'type' so it isn't repeated in the kwargs loop below
+            t = kwargs.pop("type", None)
             parts.append(str(t) if t else "str")
-            for k, v in self.kwargs.items():
+        else:
+            return None   # no constraint — trivial validator
+
+        # -------------------------------------------------------------
+        # 3. RESOLVE KWARGS (Map 'choices' -> 'in:', 'pattern' -> 're:')
+        # -------------------------------------------------------------
+        if kwargs:
+            # Handle 'choices' -> 'in:'
+            choices = kwargs.pop("choices", None)
+            if choices is not None:
+                if isinstance(choices, (list, tuple, set)):
+                    parts.append(f"in:{','.join(str(c) for c in choices)}")
+                else:
+                    parts.append(f"in:{choices}")
+
+            # Handle 'pattern' -> 're:'
+            pattern = kwargs.pop("pattern", None)
+
+            # Handle remaining standard kwargs
+            for k, v in kwargs.items():
                 if v is True or v is None:
                     parts.append(k)
                 else:
                     parts.append(f"{k}:{v}")
+
             if pattern:
                 parts.append(f"re:{pattern}")
-            rule_str = "|".join(parts)
-        else:
-            return None   # no constraint — trivial validator
 
-        # Append |nullable if requested and not already present
+        # -------------------------------------------------------------
+        # 4. ASSEMBLE FINAL STRING
+        # -------------------------------------------------------------
+        if not parts:
+            return None
+
+        # Reconstruct with transforms correctly ordered:
+        # type | <pipe-string transforms> | <new transforms from kwarg> | <validators>
+        type_token = parts[0]
+        rest = parts[1:]  # everything after the type from the pipe string
+
+        if isinstance(base, str) and tf_parts:
+            # Separate the rest into pipe-string transforms and validators.
+            # Pipe transforms must come before the new kwarg transforms, which
+            # must come before any validators.
+            pipe_transforms = [t for t in rest if t in _VALID_TRANSFORMS]
+            validators = [t for t in rest if t not in _VALID_TRANSFORMS]
+            final_parts = [type_token] + pipe_transforms + tf_parts + validators
+        else:
+            # kwargs-only path: type | transforms | validators (original order)
+            final_parts = [type_token] + tf_parts + rest
+
+        rule_str = "|".join(final_parts)
+
         if self.nullable and "nullable" not in rule_str.split("|"):
             rule_str = rule_str + "|nullable"
 

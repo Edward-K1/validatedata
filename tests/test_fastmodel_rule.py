@@ -397,6 +397,126 @@ class TestFastModelReprAndEq(unittest.TestCase):
     def test_eq_different_type(self):
         p = self.Point(x=10, y=20)
         self.assertNotEqual(p, (10, 20))
+        
+class TestFastModelChoicesKwarg(unittest.TestCase):
+    """Tests for the 'choices' kwarg (safe replacement for reserved 'in' keyword)."""
+
+    class ChoicesModel(FastModel):
+        # List of choices
+        role: str = Rule(choices=["admin", "user", "guest"])
+        
+        # Comma-separated string of choices
+        status: str = Rule("str", choices="active,pending,archived")
+        
+        # Choices combined with other standard kwargs
+        letter: str = Rule(choices=["a", "b", "c"], min=1, max=1)
+
+    def test_choices_accepts_valid_list_value(self):
+        m = self.ChoicesModel(role="admin", status="active", letter="a")
+        self.assertEqual(m.role, "admin")
+
+    def test_choices_accepts_valid_string_value(self):
+        m = self.ChoicesModel(role="user", status="pending", letter="b")
+        self.assertEqual(m.status, "pending")
+
+    def test_choices_rejects_invalid_value(self):
+        with self.assertRaises(ValidationError):
+            self.ChoicesModel(role="hacker", status="active", letter="a")
+
+    def test_choices_rejects_invalid_string_parsed_value(self):
+        with self.assertRaises(ValidationError):
+            self.ChoicesModel(role="admin", status="deleted", letter="a")
+
+    def test_choices_validates_alongside_other_kwargs(self):
+        # 'letter' must be in choices AND have exactly length 1
+        self.ChoicesModel(role="admin", status="active", letter="c")  # Passes
+        
+        with self.assertRaises(ValidationError):
+            self.ChoicesModel(role="admin", status="active", letter="ab")  # Fails max:1
+
+
+class TestFastModelTransformsKwarg(unittest.TestCase):
+    """Tests for the 'transforms' kwarg (solves the transform ordering trap)."""
+
+    class TransformsListModel(FastModel):
+        name: str = Rule(transforms=["strip", "lower"], min=3, max=10)
+
+    class TransformsStringModel(FastModel):
+        name: str = Rule(transforms="strip|lower", min=3)
+
+    class TransformsTupleModel(FastModel):
+        name: str = Rule(transforms=("strip", "lower"), min=3)
+
+    def test_transforms_applied_from_list(self):
+        m = self.TransformsListModel(name="  ALICE  ")
+        self.assertEqual(m.name, "alice")
+
+    def test_transforms_applied_from_string(self):
+        m = self.TransformsStringModel(name="  BOB  ")
+        self.assertEqual(m.name, "bob")
+
+    def test_transforms_applied_from_tuple(self):
+        m = self.TransformsTupleModel(name="  CHARLIE  ")
+        self.assertEqual(m.name, "charlie")
+
+    def test_transforms_solve_ordering_trap(self):
+        """The primary purpose of the kwarg: min/max can safely come BEFORE transforms."""
+        class OrderedModel(FastModel):
+            name: str = Rule(min=3, max=10, transforms=["strip", "lower"])
+            
+        # This would previously raise ValueError at runtime!
+        m = OrderedModel(name="  DAVE  ")
+        self.assertEqual(m.name, "dave")
+
+    def test_transforms_run_before_validation(self):
+        """Ensure transforms alter the value before min/max checks evaluate it."""
+        with self.assertRaises(ValidationError):
+            self.TransformsListModel(name="  A  ")  # stripped/lowered to "a" -> fails min:3
+
+    def test_transforms_deduplicate_with_pipe_string(self):
+        """If a pipe string and transforms kwarg both specify 'strip', it shouldn't run twice."""
+        class DedupeModel(FastModel):
+            name: str = Rule("str|strip", transforms=["lower"])
+            
+        m = DedupeModel(name="  ALICE  ")
+        self.assertEqual(m.name, "alice")
+
+    def test_transforms_rejects_unknown_transform(self):
+        """Invalid transform strings should raise ValueError at compile time."""
+        with self.assertRaises(ValueError) as ctx:
+            class BadTransformModel(FastModel):
+                name: str = Rule(transforms=["strip", "nonexistent_transform"])
+                
+        self.assertIn("Unknown transform", str(ctx.exception))
+        self.assertIn("nonexistent_transform", str(ctx.exception))
+
+
+class TestFastModelMixingKwargsAndPipe(unittest.TestCase):
+    """Tests ensuring new kwargs integrate cleanly with existing pipe syntax."""
+
+    class MixedModel(FastModel):
+        # Pipe string + choices kwarg
+        status: str = Rule("str|lower", choices=["active", "pending"])
+        
+        # Transforms kwarg + pattern kwarg
+        code: str = Rule(transforms="strip", pattern=r"^[A-Z]{3}$")
+
+    def test_pipe_and_choices_work_together(self):
+        m = self.MixedModel(status="ACTIVE", code="  ABC  ")
+        self.assertEqual(m.status, "active")
+        self.assertEqual(m.code, "ABC")
+
+    def test_pipe_and_choices_reject_invalid(self):
+        with self.assertRaises(ValidationError):
+            self.MixedModel(status="ACTIVE", code="abc")  # fails pattern
+
+    def test_pipe_transform_and_kwarg_transform_dont_duplicate(self):
+        class DoubleStripModel(FastModel):
+            name: str = Rule("str|strip", transforms=["strip", "lower"])
+            
+        # "  ALICE  " -> strip (pipe) -> "ALICE" -> strip (kwarg, ignored) -> lower -> "alice"
+        m = DoubleStripModel(name="  ALICE  ")
+        self.assertEqual(m.name, "alice")
 
 
 if __name__ == "__main__":
