@@ -1001,3 +1001,53 @@ class FastModel(metaclass=_FastModelMeta):
                 "nullable": cls.__compiled_fields__[fname].nullable,
             }
         return {"model": cls.__name__, "fields": fields}
+            
+    @classmethod
+    def get_rules(cls) -> Dict[str, Any]:
+        """
+        Return the canonical rule dictionary for this model.
+
+        Each key is a field name.  Each value is either:
+        * a pipe string (``"str|min:3|max:32"``) for scalar fields, or
+        * a nested rule dict for fields whose type is a FastModel subclass.
+
+        This is the same structure passed to ``compiled.validator`` at
+        class-creation time, so it can be inspected, serialised, or fed
+        directly into another validator.
+
+        Example::
+
+            User.get_rules()
+            # {
+            #   "username": "str|min:3|max:32|nullable",
+            #   "email":    "email",
+            #   "address":  {"street": "str", "city": "str"},
+            # }
+        """
+        return cls.__rule_dict__
+
+    @classmethod
+    def get_validator(cls) -> Callable[[Dict[str, Any]], bool]:
+        """
+        Return the compiled fast-path validator callable for this model.
+
+        The callable accepts a single ``dict`` argument and returns ``True``
+        when the data passes all field rules, ``False`` otherwise.  It is
+        the same function stored on ``__fast_validator__`` and used internally
+        by ``is_valid_data`` and ``from_dict``.
+
+        If the cached ``__fast_validator__`` is ``None``, a fresh validator
+        is compiled from the model's rule dictionary and cached for future calls.
+
+        Example::
+
+            validate = User.get_validator()
+            if validate({"username": "alice", "email": "alice@example.com"}):
+                ...
+        """
+        if cls.__fast_validator__ is not None:
+            return cls.__fast_validator__
+        
+        v = validator(cls.__rule_dict__)
+        cls.__fast_validator__ = v
+        return v
