@@ -291,6 +291,11 @@ def _tc_odd(v: Any) -> bool:
 def _tc_phone_e164(v: Any) -> bool:
     return bool(_PHONE_E164_RE.match(str(v).strip()))
 
+def _tc_email(v: Any) -> bool:
+    if not v or "@" not in str(v) or len(str(v)) > 254:
+        return False
+    return _EMAIL_RE.match(str(v)) is not None
+
 
 _TYPE_CHECK: dict[str, Callable[[Any], bool]] = {
     # native types — direct isinstance, type object captured at table-build time
@@ -303,7 +308,7 @@ _TYPE_CHECK: dict[str, Callable[[Any], bool]] = {
     'set':   lambda v: isinstance(v, set),
     'tuple': lambda v: isinstance(v, tuple),
     # non-native basic types
-    'email':  lambda v: _EMAIL_RE.match(str(v)) is not None,
+    'email':  _tc_email,
     'url':    lambda v: _URL_RE.match(str(v)) is not None,
     'ip':     _tc_ip,
     'uuid':   _tc_uuid,
@@ -366,23 +371,23 @@ _ITEM_TYPE_CHECK: dict[str, Callable[[Any], bool]] = {
 
 _ULTRA_LEN_BASED: frozenset[str] = frozenset({
     "str", "email", "url", "uuid", "ip", "slug", "semver", "phone",
-    "date", "color", "list", "dict", "set", "tuple",
+    "color", "list", "dict", "set", "tuple",
 })
 
 _ULTRA_TYPE_EXPRS: dict[str, tuple[str, dict[str, Any] | None]] = {
     'str':    ('isinstance({v}, str)', None),
-    'int':    ('isinstance({v}, int) and not isinstance({v}, bool)', None),
+    'int':    ('isinstance({v}, int)', None),
     'float':  ('isinstance({v}, float)', None),
     'bool':   ('isinstance({v}, bool)', None),
     'dict':   ('isinstance({v}, dict)', None),
     'list':   ('isinstance({v}, list)', None),
     'set':    ('isinstance({v}, set)', None),
     'tuple':  ('isinstance({v}, tuple)', None),
-    'email':  ('_EMAIL_RE.match(str({v})) is not None', None),
+    'email':  ('_tc_email({v})', {'_tc_email': _tc_email}),
     'url':    ('_RE_url.match(str({v})) is not None', {'_RE_url': _URL_RE}),
     'slug':   ('_RE_slug.match(str({v})) is not None', {'_RE_slug': _SLUG_RE}),
     'semver': ('_RE_semver.match(str({v})) is not None', {'_RE_semver': _SEMVER_RE}),
-    'phone':  ('_RE_phone.match(str({v})) is not None', {'_RE_phone': _PHONE_E164_RE}),
+    'phone':  ('_RE_phone.match(str({v}).strip()) is not None', {'_RE_phone': _PHONE_E164_RE}),
     'ip':     ('_tc_ip({v})', {'_tc_ip': _tc_ip}),
     'uuid':   ('_tc_uuid({v})', {'_tc_uuid': _tc_uuid}),
     'date':   ('_tc_date({v})', {'_tc_date': _tc_date}),
@@ -1053,6 +1058,7 @@ def _make_dict_callable(
     return ns["_fn"]  # type: ignore[return-value]
 
 import re as _re_module  # Ensure we have a local alias to avoid clashes
+
 def _ultra_compile_dict(schema: dict) -> Callable[[Any], bool]:
     """Generate a fully inlined, single-frame validator for simple schemas.
 
@@ -1064,7 +1070,8 @@ def _ultra_compile_dict(schema: dict) -> Callable[[Any], bool]:
     keeping the entire block inside a single try/except.
     """
     ns: dict[str, Any] = {
-        "_EMAIL_RE": _EMAIL_RE,
+        "_tc_date": _tc_date,
+        "_is_valid_color": _is_valid_color,
     }
 
     lines: list[str] = ["def _fn(data):"]
@@ -1082,16 +1089,26 @@ def _ultra_compile_dict(schema: dict) -> Callable[[Any], bool]:
     def _build_exprs(var: str, type_tok: str, modifiers: list[str]) -> list[str]:
         exprs = []
     
-        # Determine if this is a len-based or value-based type for range checks.
+        # Determine type characteristics for range checks.
         _is_parameterized = _PARAMETERIZED_RE.match(type_tok) is not None
-        _use_len = type_tok in _ULTRA_LEN_BASED or _is_parameterized
+        _is_date = type_tok == "date"
+        _is_color = type_tok == "color"
+        _is_str_derived = type_tok in (
+            "str", "email", "url", "slug", "semver", "phone", "uuid", "ip",
+        )
+        _is_container = type_tok in ("list", "tuple", "set", "dict")
+        _use_len = (type_tok in _ULTRA_LEN_BASED or _is_parameterized) and not _is_date
     
-        # Type check — always first for short-circuit safety
+        # Track date range bounds for specialized handling.
+        _date_lo: str | None = None
+        _date_hi: str | None = None
+    
+        # Type check — always first for short-circuit safety.
         if _is_parameterized:
             m_p = _PARAMETERIZED_RE.match(type_tok)
             outer = m_p.group(1)
             inner_names = [t.strip() for t in m_p.group(2).split(",")]
-            outer_py = outer  # "list", "tuple", "set" are valid Python builtins
+            outer_py = outer
             if len(inner_names) == 1:
                 inner = inner_names[0]
                 if inner == "int":
@@ -1099,19 +1116,23 @@ def _ultra_compile_dict(schema: dict) -> Callable[[Any], bool]:
                 elif inner in ("str", "float", "bool"):
                     inner_expr = f"isinstance(i, {inner})"
                 else:
-                    # Non-native item type: use _ITEM_TYPE_CHECK via a captured callable
                     nm = f"_ic_{_counter[0]}"
                     ns[nm] = _ITEM_TYPE_CHECK.get(inner) or _TYPE_CHECK.get(inner)
                     inner_expr = f"{nm}(i)"
                 exprs.append(f"isinstance({var}, {outer_py}) and all({inner_expr} for i in {var})")
             else:
-                # Union item types
                 checkers_nm = f"_ics_{_counter[0]}"
                 ns[checkers_nm] = tuple(_ITEM_TYPE_CHECK[n] for n in inner_names)
                 exprs.append(
                     f"isinstance({var}, {outer_py}) and "
                     f"all(any(_c(i) for _c in {checkers_nm}) for i in {var})"
                 )
+        elif _is_date:
+            # Will be replaced by range checker if bounds present, else use standard
+            exprs.append(f"_tc_date({var})")
+        elif _is_color:
+            # Default color check; format: modifier may replace exprs[0] below.
+            exprs.append(f"_is_valid_color({var})")
         else:
             type_info = _ULTRA_TYPE_EXPRS.get(type_tok)
             if type_info is None:
@@ -1128,6 +1149,26 @@ def _ultra_compile_dict(schema: dict) -> Callable[[Any], bool]:
     
             if key in ("strict", "nullable", "msg"):
                 continue
+            # ---- format: for color (replaces the type-check expression) ----
+            elif key == "format":
+                if _is_color and val:
+                    if val == "hex":
+                        nm = f"_re_{_counter[0]}"
+                        ns[nm] = _HEX_COLOR_RE
+                        exprs[0] = f"{nm}.match(str({var}).strip()) is not None"
+                    elif val == "rgb":
+                        nm = f"_re_{_counter[0]}"
+                        ns[nm] = _RGB_COLOR_RE
+                        exprs[0] = f"{nm}.match(str({var}).strip()) is not None"
+                    elif val == "hsl":
+                        nm = f"_re_{_counter[0]}"
+                        ns[nm] = _HSL_COLOR_RE
+                        exprs[0] = f"{nm}.match(str({var}).strip()) is not None"
+                    elif val == "named":
+                        nm = f"_nc_{_counter[0]}"
+                        ns[nm] = _NAMED_COLORS
+                        exprs[0] = f"str({var}).strip().lower() in {nm}"
+            # ---- set membership ----
             elif key == "in" and val:
                 nm = f"_o{_counter[0]}"
                 ns[nm] = frozenset(x.strip() for x in val.split(","))
@@ -1136,44 +1177,145 @@ def _ultra_compile_dict(schema: dict) -> Callable[[Any], bool]:
                 nm = f"_e{_counter[0]}"
                 ns[nm] = frozenset(x.strip() for x in val.split(","))
                 exprs.append(f"{var} not in {nm}")
+            # ---- regex ----
             elif key == "re" and val:
                 nm = f"_r{_counter[0]}"
-                ns[nm] = _re_module.compile(val)
+                ns[nm] = _re_module.compile(val, _re_module.VERBOSE)
                 exprs.append(f"{nm}.match({var}) is not None")
+            # ---- prefix / suffix (str and derived; list/tuple use first/last element) ----
+            elif key == "starts_with" and val:
+                if type_tok in ("list", "tuple"):
+                    exprs.append(f"bool({var}) and {var}[0] == {val!r}")
+                else:
+                    exprs.append(f"str({var}).startswith({val!r})")
+            elif key == "ends_with" and val:
+                if type_tok in ("list", "tuple"):
+                    exprs.append(f"bool({var}) and {var}[-1] == {val!r}")
+                else:
+                    exprs.append(f"str({var}).endswith({val!r})")
+            # ---- contains ----
+            elif key == "contains" and val:
+                if _is_str_derived:
+                    # String types: substring containment (AND semantics —
+                    # every comma-separated value must be present, matching
+                    # engine.py's validate_contains all(r in s for r in required)).
+                    if "," in val:
+                        nm = f"_ct{_counter[0]}"
+                        ns[nm] = tuple(x.strip() for x in val.split(","))
+                        exprs.append(f"all(x in {var} for x in {nm})")
+                    else:
+                        exprs.append(f"{val!r} in {var}")
+                elif _is_container:
+                    # Container types: item membership (all must be present)
+                    if "," in val:
+                        nm = f"_ct{_counter[0]}"
+                        ns[nm] = tuple(x.strip() for x in val.split(","))
+                        exprs.append(f"all(x in {var} for x in {nm})")
+                    else:
+                        exprs.append(f"{val!r} in {var}")
+            # ---- unique (hashable containers only in ultra path) ----
+            elif key == "unique":
+                if type_tok in ("list", "tuple", "set"):
+                    exprs.append(f"len({var}) == len(set({var}))")
+            # ---- range bounds ----
             elif key == "between" and val:
                 parts = val.split(",")
                 if len(parts) == 2:
                     lo, hi = parts[0].strip(), parts[1].strip()
-                    if _use_len:
+                    if _is_date:
+                        _date_lo = lo
+                        _date_hi = hi
+                    elif _use_len:
                         exprs.append(f"{lo} <= len({var}) <= {hi}")
                     else:
                         exprs.append(f"{lo} <= {var} <= {hi}")
             elif key in ("min", "max", "length") and val:
-                if _use_len:
-                    if key == "min": exprs.append(f"len({var}) >= {val}")
-                    elif key == "max": exprs.append(f"len({var}) <= {val}")
-                    elif key == "length": exprs.append(f"len({var}) == {val}")
+                if _is_date:
+                    if key == "min":
+                        _date_lo = val
+                    elif key == "max":
+                        _date_hi = val
+                    # length does not apply to dates
+                elif _use_len:
+                    if key == "min":
+                        exprs.append(f"len({var}) >= {val}")
+                    elif key == "max":
+                        exprs.append(f"len({var}) <= {val}")
+                    elif key == "length":
+                        exprs.append(f"len({var}) == {val}")
                 else:
-                    if key == "min": exprs.append(f"{var} >= {val}")
-                    elif key == "max": exprs.append(f"{var} <= {val}")
+                    if key == "min":
+                        exprs.append(f"{var} >= {val}")
+                    elif key == "max":
+                        exprs.append(f"{var} <= {val}")
+    
+        # ---- date ranges: replace type check with fused range checker ----
+        if _is_date and (_date_lo is not None or _date_hi is not None):
+            nm = f"_drc{_counter[0]}"
+            ns[nm] = _make_date_range_checker(_date_lo, _date_hi)
+            exprs[0] = f"{nm}({var})"
     
         return exprs
 
     def _emit(d: dict, parent_var: str, indent: str):
         for f, rule in d.items():
-            var = _new_var()
-            lines.append(f"{indent}{var} = {parent_var}[{f!r}]")
             if isinstance(rule, dict):
-                # Guard: the nested value must itself be a dict
+                var = _new_var()
+                lines.append(f"{indent}{var} = {parent_var}[{f!r}]")
                 lines.append(f"{indent}if not isinstance({var}, dict): return False")
-                # Recurse at the SAME indentation level
                 _emit(rule, var, indent)
             else:
                 tokens = rule.split("|")
                 type_tok = tokens[0].strip()
-                exprs = _build_exprs(var, type_tok, tokens[1:])
+    
+                # Detect nullable flag.
+                is_nullable = any(t.strip() == "nullable" for t in tokens[1:])
+    
+                # Separate transform tokens from validator modifiers.
+                transform_keys: list[str] = []
+                modifier_tokens: list[str] = []
+                for tok in tokens[1:]:
+                    k, _, _ = tok.partition(":")
+                    k = k.strip()
+                    if k in _TRANSFORM_MAP:
+                        transform_keys.append(k)
+                    elif k not in ("nullable", "strict", "msg"):
+                        modifier_tokens.append(tok)
+    
+                # Build a single transform callable if any transforms present.
+                transform_nm: str | None = None
+                if transform_keys:
+                    _fns = [_TRANSFORM_MAP[k] for k in transform_keys]
+                    transform_nm = f"_tf{_counter[0]}"
+                    ns[transform_nm] = (
+                        _fns[0] if len(_fns) == 1 else _chain_transforms(_fns)
+                    )
+    
+                var = _new_var()
+                exprs = _build_exprs(var, type_tok, modifier_tokens)
                 check = " and ".join(exprs) if exprs else "True"
-                lines.append(f"{indent}if not ({check}): return False")
+    
+                if is_nullable:
+                    if transform_nm:
+                        # Nullable + transform: fetch raw, skip if None, else transform+check.
+                        raw = f"_raw{var}"
+                        lines.append(f"{indent}{raw} = {parent_var}.get({f!r})")
+                        lines.append(f"{indent}if {raw} is not None:")
+                        lines.append(f"{indent}    {var} = {transform_nm}({raw})")
+                        lines.append(f"{indent}    if not ({check}): return False")
+                    else:
+                        # Nullable, no transform: fetch with .get(), skip if None.
+                        lines.append(f"{indent}{var} = {parent_var}.get({f!r})")
+                        lines.append(f"{indent}if {var} is not None:")
+                        lines.append(f"{indent}    if not ({check}): return False")
+                else:
+                    if transform_nm:
+                        # Required + transform: direct index access, transform, check.
+                        lines.append(f"{indent}{var} = {transform_nm}({parent_var}[{f!r}])")
+                    else:
+                        # Required, no transform: direct index access.
+                        lines.append(f"{indent}{var} = {parent_var}[{f!r}]")
+                    lines.append(f"{indent}if not ({check}): return False")
 
     # We are inside the try: block, so use 8 spaces for the body
     _emit(schema, "data", "        ")
@@ -1244,7 +1386,10 @@ def validator(rule: str | dict, codegen=True) -> Callable[[Any], bool]:
             f"validator expects a str or dict, got {type(rule).__name__!r}"
         )
 
-    cache_key: str = rule if isinstance(rule, str) else json.dumps(rule, sort_keys=True)
+    cache_key: str = (
+        rule if isinstance(rule, str)
+        else f"{json.dumps(rule, sort_keys=True)}|codegen={codegen}"
+    )
 
     cached = _cache_get(cache_key)
     if cached is not None:
@@ -1270,10 +1415,10 @@ def validator(rule: str | dict, codegen=True) -> Callable[[Any], bool]:
 # Ultra-fused complexity budget
 # ---------------------------------------------------------------------------
 
-_ULTRA_MAX_TOP_FIELDS:   int = 30
-_ULTRA_MAX_NESTED_FIELDS: int = 20
-_ULTRA_MAX_TOP_BYTES:    int = 800
-_ULTRA_MAX_NESTED_BYTES: int = 800
+_ULTRA_MAX_TOP_FIELDS:   int = 200
+_ULTRA_MAX_NESTED_FIELDS: int = 200
+_ULTRA_MAX_TOP_BYTES:    int = 4096
+_ULTRA_MAX_NESTED_BYTES: int = 4096
 
 # ---------------------------------------------------------------------------
 # Ultra-fused type categories
@@ -1284,7 +1429,6 @@ _ULTRA_NATIVE_TYPES: frozenset[str] = frozenset({
 })
 
 _ULTRA_REGEX_TYPES: dict[str, str] = {
-    "email":  "_RE_email",
     "url":    "_RE_url",
     "slug":   "_RE_slug",
     "semver": "_RE_semver",
@@ -1292,6 +1436,7 @@ _ULTRA_REGEX_TYPES: dict[str, str] = {
 }
 
 _ULTRA_FUNC_TYPES: dict[str, str] = {
+    "email": "_tc_email",
     "ip":    "_tc_ip",
     "uuid":  "_tc_uuid",
     "date":  "_tc_date",
@@ -1345,7 +1490,7 @@ _ULTRA_REGEX_FAST_REJECT: dict[str, str] = {
     "email":  "'@' in {v}",
     "url":    "':' in {v}",
     "phone":  "{v}.startswith('+')",
-    "semver": "{v}.count('.') == 2",
+    "semver": "{v}.count('.') >= 2",
 }
 
 
@@ -1361,8 +1506,7 @@ def _is_ultra_simple_schema(
     _max_bytes: int = _ULTRA_MAX_TOP_BYTES,
 ) -> bool:
     """Return True when every rule in *schema* can be ultra-fused."""
-    if _depth > 5:
-        return False
+
     if not isinstance(schema, dict):
         return False
 
@@ -1439,10 +1583,7 @@ def _is_ultra_simple_schema(
             key = tok.split(":")[0].strip()
             if key in _ULTRA_UNSUPPORTED_MODIFIERS:
                 return False
-            # Exclude nullable and transforms so we can safely use a single 
-            # flat try/except KeyError block for field extraction in _ultra_compile_dict
-            if key == "nullable" or key in _ULTRA_TRANSFORM_INLINE:
-                return False
+
             if key not in valid_modifiers:
                 return False
 
@@ -1463,7 +1604,9 @@ def _ultra_compile_rule_exprs(
     transforms = []
     min_val = max_val = between_lo = between_hi = length_val = None
     in_vals = not_in_vals = contains_vals = starts_with_val = ends_with_val = re_val = None
-    
+    date_lo = date_hi = None
+    _is_date = type_tok == "date"
+
     ns_vars: dict[str, Any] = {}
 
     for tok in modifier_tokens:
@@ -1476,14 +1619,23 @@ def _ultra_compile_rule_exprs(
         elif key in _ULTRA_TRANSFORM_INLINE:
             transforms.append(_ULTRA_TRANSFORM_INLINE[key])
         elif key == "min":
-            min_val = val
+            if _is_date:
+                date_lo = val
+            else:
+                min_val = val
         elif key == "max":
-            max_val = val
+            if _is_date:
+                date_hi = val
+            else:
+                max_val = val
         elif key == "between":
             if val:
                 parts = val.split(",", 1)
                 if len(parts) == 2:
-                    between_lo, between_hi = parts[0].strip(), parts[1].strip()
+                    if _is_date:
+                        date_lo, date_hi = parts[0].strip(), parts[1].strip()
+                    else:
+                        between_lo, between_hi = parts[0].strip(), parts[1].strip()
         elif key == "length":
             length_val = val
         elif key == "in":
@@ -1509,6 +1661,7 @@ def _ultra_compile_rule_exprs(
     chk = transform_expr if transform_expr else var
 
     # --- Type Expression ---
+    _container_scan_expr: str | None = None
     if type_tok in _ULTRA_NATIVE_TYPES:
         type_expr = f"isinstance({chk}, {type_tok})"
     elif type_tok.startswith(('list[', 'tuple[', 'set[')):
@@ -1518,18 +1671,31 @@ def _ultra_compile_rule_exprs(
             inner_expr = "isinstance(i, int) and not isinstance(i, bool)"
         else:
             inner_expr = f"isinstance(i, {inner})"
-        type_expr = f"isinstance({chk}, {outer}) and all({inner_expr} for i in {chk})"
+        # Cheap isinstance() guard goes in type_expr (must run before any
+        # len()/range check below, which assumes a real container). The
+        # expensive O(n) item-type scan is kept separate so it can be placed
+        # after the cheap length/between checks instead of always running first.
+        type_expr = f"isinstance({chk}, {outer})"
+        _container_scan_expr = f"all({inner_expr} for i in {chk})"
     elif type_tok in _ULTRA_REGEX_TYPES:
         ns_key = _ULTRA_REGEX_TYPES[type_tok]
+        # Coerce to str the same way the regular (non-ultra) path does via
+        # _TYPE_CHECK / _tc_phone_e164 — str(v), not isinstance(v, str).
+        # This also makes the fast-reject substring checks below safe to run
+        # (they assume a string operand) instead of raising TypeError on a
+        # non-string input.
+        str_expr = f"str({chk}).strip()" if type_tok == "phone" else f"str({chk})"
         fast_reject = _ULTRA_REGEX_FAST_REJECT.get(type_tok)
         if fast_reject:
+            sv = f"_sv_{idx}"
+            # Walrus binds the coerced string once; reused in the match call
+            # without recomputing str(...)/.strip() a second time.
             type_expr = (
-                f"isinstance({chk}, str) and "
-                f"{fast_reject.format(v=chk)} and "
-                f"{ns_key}.match({chk}) is not None"
+                f"{fast_reject.format(v=f'({sv} := {str_expr})')} and "
+                f"{ns_key}.match({sv}) is not None"
             )
         else:
-            type_expr = f"isinstance({chk}, str) and {ns_key}.match({chk}) is not None"
+            type_expr = f"{ns_key}.match({str_expr}) is not None"
     elif type_tok in _ULTRA_FUNC_TYPES:
         ns_key = _ULTRA_FUNC_TYPES[type_tok]
         type_expr = f"{ns_key}({chk})"
@@ -1538,64 +1704,72 @@ def _ultra_compile_rule_exprs(
 
     bool_exprs: list[str] = [type_expr]
 
-    use_len = type_tok in _ULTRA_LEN_TYPES or type_tok.startswith(('list[', 'tuple[', 'set['))
-
-    # --- Range Expressions ---
-    if between_lo is not None and between_hi is not None:
-        if use_len:
-            bool_exprs.append(f"{between_lo} <= len({chk}) <= {between_hi}")
-        else:
-            bool_exprs.append(f"{between_lo} <= {chk} <= {between_hi}")
+    if _is_date and (date_lo is not None or date_hi is not None):
+        nm = f"_drc_{idx}"
+        ns_vars[nm] = _make_date_range_checker(date_lo, date_hi)
+        bool_exprs[0] = f"{nm}({chk})"
     else:
-        if min_val is not None:
+        use_len = type_tok in _ULTRA_LEN_TYPES or type_tok.startswith(('list[', 'tuple[', 'set['))
+
+        # --- Range Expressions ---
+        if between_lo is not None and between_hi is not None:
             if use_len:
-                bool_exprs.append(f"len({chk}) >= {min_val}")
+                bool_exprs.append(f"{between_lo} <= len({chk}) <= {between_hi}")
             else:
-                bool_exprs.append(f"{chk} >= {min_val}")
-        if max_val is not None:
-            if use_len:
-                bool_exprs.append(f"len({chk}) <= {max_val}")
-            else:
-                bool_exprs.append(f"{chk} <= {max_val}")
+                bool_exprs.append(f"{between_lo} <= {chk} <= {between_hi}")
+        else:
+            if min_val is not None:
+                if use_len:
+                    bool_exprs.append(f"len({chk}) >= {min_val}")
+                else:
+                    bool_exprs.append(f"{chk} >= {min_val}")
+            if max_val is not None:
+                if use_len:
+                    bool_exprs.append(f"len({chk}) <= {max_val}")
+                else:
+                    bool_exprs.append(f"{chk} <= {max_val}")
 
     if length_val is not None:
         bool_exprs.append(f"len({chk}) == {length_val}")
+
+    if _container_scan_expr is not None:
+        bool_exprs.append(_container_scan_expr)
 
     # --- Pattern Expressions ---
     is_seq = type_tok in ("list", "tuple") or type_tok.startswith(('list[', 'tuple['))
 
     # starts_with / ends_with
+    # NOTE: for list/tuple, engine.py's validate_startswith/validate_endswith
+    # compare only the first/last *element* against the single literal value
+    # (bool(value) and value[0] == prefix) — there is no multi-element/slice
+    # matching in the original validator, so we must not comma-split here.
     if starts_with_val is not None:
         ns_name = f"_sw_{idx}"
         val = starts_with_val
         if is_seq:
-            parts = [p.strip() for p in val.split(',')]
             if type_tok.startswith('list[int') or type_tok.startswith('tuple[int'):
-                parts = [int(p) for p in parts]
+                val = int(val)
             elif type_tok.startswith('list[float') or type_tok.startswith('tuple[float'):
-                parts = [float(p) for p in parts]
-            val = tuple(parts)
+                val = float(val)
         ns_vars[ns_name] = val
         if is_seq:
-            bool_exprs.append(f"len({chk}) >= len({ns_name}) and {chk}[:len({ns_name})] == {ns_name}")
+            bool_exprs.append(f"bool({chk}) and {chk}[0] == {ns_name}")
         else:
-            bool_exprs.append(f"{chk}.startswith({ns_name})")
+            bool_exprs.append(f"str({chk}).startswith({ns_name})")
 
     if ends_with_val is not None:
         ns_name = f"_ew_{idx}"
         val = ends_with_val
         if is_seq:
-            parts = [p.strip() for p in val.split(',')]
             if type_tok.startswith('list[int') or type_tok.startswith('tuple[int'):
-                parts = [int(p) for p in parts]
+                val = int(val)
             elif type_tok.startswith('list[float') or type_tok.startswith('tuple[float'):
-                parts = [float(p) for p in parts]
-            val = tuple(parts)
+                val = float(val)
         ns_vars[ns_name] = val
         if is_seq:
-            bool_exprs.append(f"len({chk}) >= len({ns_name}) and {chk}[-len({ns_name}):] == {ns_name}")
+            bool_exprs.append(f"bool({chk}) and {chk}[-1] == {ns_name}")
         else:
-            bool_exprs.append(f"{chk}.endswith({ns_name})")
+            bool_exprs.append(f"str({chk}).endswith({ns_name})")
 
     # in / not_in (scalars only)
     if in_vals is not None:
@@ -1644,7 +1818,7 @@ def _ultra_compile_rule_exprs(
     if re_val is not None:
         ns_name = f"_re_{idx}"
         # Compile at codegen time for maximum runtime speed
-        ns_vars[ns_name] = re.compile(re_val)
+        ns_vars[ns_name] = re.compile(re_val, re.VERBOSE)
         bool_exprs.append(f"{ns_name}.match({chk}) is not None")
 
     return nullable, transform_expr, bool_exprs, ns_vars
@@ -1660,8 +1834,14 @@ def _ultra_emit_checks(
     data_var: str,
     *,
     _counter: list[int],
+    ns: dict[str, Any],
 ) -> None:
-    """Append ultra-fused field-check lines for *schema* into *lines*."""
+    """Append ultra-fused field-check lines for *schema* into *lines*.
+
+    Any compile-time namespace values produced for a field (compiled regexes,
+    frozensets for in:/not_in:, the date-range checker, etc.) are merged into
+    *ns* so they're available in the exec() namespace at call time.
+    """
     for field, rule in schema.items():
         idx = _counter[0]
         _counter[0] += 1
@@ -1671,7 +1851,7 @@ def _ultra_emit_checks(
             sub_var = f"_s{idx}"
             lines.append(f"{indent}{sub_var} = {data_var}[{safe_field}]")
             lines.append(f"{indent}if not isinstance({sub_var}, dict): return False")
-            _ultra_emit_checks(rule, lines, indent, sub_var, _counter=_counter)
+            _ultra_emit_checks(rule, lines, indent, sub_var, _counter=_counter, ns=ns)
             continue
 
         var = f"_v{idx}"
@@ -1681,6 +1861,8 @@ def _ultra_emit_checks(
         nullable, transform_expr, bool_exprs, ns_vars = _ultra_compile_rule_exprs(
             type_tok, tokens[1:], var, idx
         )
+        if ns_vars:
+            ns.update(ns_vars)
 
         if nullable:
             lines.append(f"{indent}{var} = {data_var}.get({safe_field})")
@@ -1714,6 +1896,59 @@ def _ultra_emit_checks(
                     lines.append(f"{indent}if not ({combined}): return False")
 
 
+def _make_date_range_checker(
+    lo: str | None,
+    hi: str | None,
+) -> Callable[[Any], bool]:
+    """Create an inlined date validator with pre-parsed bounds.
+    
+    Parses bounds once at compile time; at call time parses the value
+    once and compares. Returns False for any non-date input.
+    """
+    from datetime import datetime as _dt
+    
+    _lo_dt: _dt | None = parse_date(lo) if lo is not None else None
+    _hi_dt: _dt | None = parse_date(hi) if hi is not None else None
+    
+    if _lo_dt is not None and _hi_dt is not None:
+        def _check(v: Any, __lo=_lo_dt, __hi=_hi_dt) -> bool:
+            if isinstance(v, _dt):
+                dt = v
+            else:
+                try:
+                    dt = parse_date(v)
+                    if not isinstance(dt, _dt):
+                        return False
+                except Exception:
+                    return False
+            return __lo <= dt <= __hi
+    elif _lo_dt is not None:
+        def _check(v: Any, __lo=_lo_dt) -> bool:
+            if isinstance(v, _dt):
+                dt = v
+            else:
+                try:
+                    dt = parse_date(v)
+                    if not isinstance(dt, _dt):
+                        return False
+                except Exception:
+                    return False
+            return dt >= __lo
+    else:  # _hi_dt is not None
+        def _check(v: Any, __hi=_hi_dt) -> bool:
+            if isinstance(v, _dt):
+                dt = v
+            else:
+                try:
+                    dt = parse_date(v)
+                    if not isinstance(dt, _dt):
+                        return False
+                except Exception:
+                    return False
+            return dt <= __hi
+    
+    return _check
+
 # ---------------------------------------------------------------------------
 # Ultra-fused function factory
 # ---------------------------------------------------------------------------
@@ -1725,13 +1960,12 @@ def _make_ultra_fused_validator(schema: dict) -> Callable[[Any], bool]:
         "    if not isinstance(data, dict): return False",
         "    try:",
     ]
-    _ultra_emit_checks(schema, lines, indent="        ", data_var="data", _counter=[0])
+    ns: dict[str, Any] = {}
+    _ultra_emit_checks(schema, lines, indent="        ", data_var="data", _counter=[0], ns=ns)
     lines.append("        return True")
     lines.append("    except KeyError: return False")
 
     source = "\n".join(lines)
-
-    ns: dict[str, Any] = {}
 
     used_types: set[str] = set()
     def _collect_types(s: dict) -> None:
@@ -1744,7 +1978,6 @@ def _make_ultra_fused_validator(schema: dict) -> Callable[[Any], bool]:
 
     if used_types & frozenset(_ULTRA_REGEX_TYPES):
         _regex_map = {
-            "_RE_email":  _EMAIL_RE,
             "_RE_url":    _URL_RE,
             "_RE_slug":   _SLUG_RE,
             "_RE_semver": _SEMVER_RE,
@@ -1756,6 +1989,7 @@ def _make_ultra_fused_validator(schema: dict) -> Callable[[Any], bool]:
 
     if used_types & frozenset(_ULTRA_FUNC_TYPES):
         _func_map = {
+            "_tc_email": _tc_email,
             "_tc_ip":    _tc_ip,
             "_tc_uuid":  _tc_uuid,
             "_tc_date":  _tc_date,
@@ -1825,7 +2059,7 @@ def fast_validator(
         except Exception:
             pass
         # Ultra-fused path was ineligible or timed out — fall back to regular codegen.
-        return validator(schema, codegen=True)
+        return validator(schema, codegen=codegen)
 
     # codegen=False: skip all emit/exec work, use the plain loop path.
     return validator(schema, codegen=codegen)

@@ -80,6 +80,57 @@ nested_invalid = {
 # -----------------------------
 EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 
+
+# -----------------------------
+# Manual (pure Python baseline)
+# -----------------------------
+def manual_validate(data: Dict[str, Any]) -> bool:
+    try:
+        # Top level
+        if not isinstance(data, dict) or "user" not in data:
+            return False
+        user = data["user"]
+        if not isinstance(user, dict):
+            return False
+        
+        # User fields
+        if not isinstance(user.get("id"), int):
+            return False
+        name = user.get("name")
+        if not isinstance(name, str) or len(name) < 1:
+            return False
+        
+        # Profile
+        profile = user.get("profile")
+        if not isinstance(profile, dict):
+            return False
+        
+        email = profile.get("email")
+        if not isinstance(email, str) or not EMAIL_REGEX.match(email):
+            return False
+        age = profile.get("age")
+        if not isinstance(age, int) or age < 0 or age > 120:
+            return False
+        
+        # Address
+        address = profile.get("address")
+        if not isinstance(address, dict):
+            return False
+        street = address.get("street")
+        if not isinstance(street, str) or len(street) < 1:
+            return False
+        city = address.get("city")
+        if not isinstance(city, str) or len(city) < 1:
+            return False
+        zip_code = address.get("zip")
+        if not isinstance(zip_code, str) or len(zip_code) != 5:
+            return False
+        
+        return True
+    except Exception:
+        return False
+        
+        
 # -----------------------------
 # Validatedata
 # -----------------------------
@@ -295,6 +346,7 @@ def bench_all(data, reps: int):
     print(f"\n=== Running {reps:,} reps (~{size} bytes) ===")
 
     for label, fn in [
+        ("manual", manual_validate),
         ("validatedata_validator", validatedata_validate),
         ("fastmodel", fastmodel_validate),
         ("pydantic_v2", pydantic_validate),
