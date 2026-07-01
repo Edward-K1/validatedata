@@ -176,15 +176,30 @@ class TestValidateTypesFixed(unittest.TestCase):
             return a + b
 
         # Too few arguments
+        # Message wording differs between the interpreted path (Signature.bind:
+        # "missing a required argument: 'b'") and the codegen path (native
+        # call binding: "...() missing 1 required positional argument: 'b'").
+        # Assert on what both agree on: it's about 'b', and it's missing.
         with self.assertRaises(ValidationError) as ctx:
             required_two(1)
-        self.assertIn("missing a required argument", str(ctx.exception))
+
+        msg = str(ctx.exception)
+        self.assertIn("missing", msg)
+        self.assertIn("b", msg)
 
         # Too many arguments
+        # Same wording split: Signature.bind says "too many positional
+        # arguments"; native binding says "takes 2 positional arguments but
+        # 3 were given". Assert on the shared substance instead.
         with self.assertRaises(ValidationError) as ctx:
             required_two(1, 2, 3)
-        # Python's error message for too many positional arguments
-        self.assertIn("too many positional arguments", str(ctx.exception))
+
+        msg = str(ctx.exception)
+        self.assertTrue(
+            "too many positional arguments" in msg
+            or "positional arguments but" in msg,
+            msg,
+        )
 
         # With raise_exceptions=False, returns error dict
         @validate_types(raise_exceptions=False)

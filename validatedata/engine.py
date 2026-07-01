@@ -1137,18 +1137,22 @@ class _CacheNamespace:
     def size(self) -> dict[str, int]:
         """Return the number of entries in each cache."""
         from .compiled import _COMPILED_CACHE
+        from .decorator import _TEMPLATE_CACHE, _CODEGEN_CACHE
         return {
             'fn':         len(_FN_CACHE),
             'args':       len(_ARGS_CACHE),
             'expression': len(_EXPRESSION_CACHE),
             'compiled':   len(_COMPILED_CACHE),
+            'type_template': len(_TEMPLATE_CACHE),
+            'type_codegen':  len(_CODEGEN_CACHE),
         }
 
     def __repr__(self) -> str:
         s = self.size()
         return (
             f'<validatedata cache  fn={s["fn"]}  args={s["args"]}  '
-            f'expression={s["expression"]}  compiled={s["compiled"]}>'
+            f'expression={s["expression"]}  compiled={s["compiled"]}  '
+            f'type_template={s["type_template"]}  type_codegen={s["type_codegen"]}>'
         )
 
 
