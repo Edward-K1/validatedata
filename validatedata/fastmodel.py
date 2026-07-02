@@ -378,22 +378,33 @@ def _compiled_rule_for(rule_obj: Rule) -> _fast._CompiledRule:
     """
     Convert a Rule into a _CompiledRule.
 
-    Fast path: rule_obj.rule is a str → _fast._get_compiled_rule (LRU cached).
-    Fallback: compile() then wrap in a trivial struct that holds at least
-    the fast_validator and nullable flag so the __init__ loop stays uniform.
+    Always resolves the full pipe string via _resolve_rule_string() so that
+    kwargs (choices, min, max, pattern, transforms, msg, etc.) are included
+    regardless of whether the Rule was built from a raw string or keyword args.
+    Falls back to compile() and then to a trivial pass-through on error.
     """
-    # Preferred: pipe string → fully cached _CompiledRule with message support
-    if isinstance(rule_obj.rule, str):
+    # Resolve the canonical pipe string (idempotent, returns None for unconstrained).
+    try:
+        resolved = rule_obj._resolve_rule_string()
+    except ValueError:
+        # Unknown transform or other author error — re-raise so the class body
+        # sees it immediately rather than silently producing a broken model.
+        raise
+    except Exception:
+        resolved = None
+
+    # Preferred: resolved pipe string → fully cached _CompiledRule with
+    # message support, transforms, custom_msg, etc.
+    if resolved is not None:
         try:
-            cr = _fast._get_compiled_rule(rule_obj.rule)
-            # Ensure rule_str is set on the compiled rule for diagnostics
+            cr = _fast._get_compiled_rule(resolved)
             if getattr(cr, "rule_str", None) is None:
-                cr.rule_str = rule_obj.rule
+                cr.rule_str = resolved
             return cr
         except Exception:
             pass
 
-    # Compile the rule to get the bool callable and optional struct
+    # Fallback: compile() (uses the same resolved string internally).
     try:
         compiled_fn, compiled_struct = rule_obj.compile()
     except Exception:
@@ -402,20 +413,13 @@ def _compiled_rule_for(rule_obj: Rule) -> _fast._CompiledRule:
     # If fast.py already gave us a proper _CompiledRule, use it directly.
     if isinstance(compiled_struct, _fast._CompiledRule):
         if getattr(compiled_struct, "rule_str", None) is None:
-            try:
-                compiled_struct.rule_str = rule_obj._resolve_rule_string()
-            except Exception:
-                compiled_struct.rule_str = getattr(rule_obj, "rule", None)
+            compiled_struct.rule_str = resolved
         return compiled_struct
 
-    # Build a minimal wrapper so the hot-path loop needs no isinstance checks
+    # Build a minimal wrapper so the hot-path loop needs no isinstance checks.
     nullable = getattr(compiled_struct, "nullable", False) if compiled_struct else False
     nullable = nullable or rule_obj.nullable
     transform = getattr(compiled_struct, "transform", None) if compiled_struct else None
-    try:
-        resolved_rule_str = rule_obj._resolve_rule_string()
-    except Exception:
-        resolved_rule_str = getattr(rule_obj, "rule", None)
 
     return _fast._CompiledRule(
         fast_validator=compiled_fn,
@@ -425,7 +429,7 @@ def _compiled_rule_for(rule_obj: Rule) -> _fast._CompiledRule:
         transform=transform,
         validator_names=["type"],
         validator_args=[None],
-        rule_str=resolved_rule_str,
+        rule_str=resolved,
     )
 
 
@@ -1001,3 +1005,53 @@ class FastModel(metaclass=_FastModelMeta):
                 "nullable": cls.__compiled_fields__[fname].nullable,
             }
         return {"model": cls.__name__, "fields": fields}
+            
+    @classmethod
+    def get_rules(cls) -> Dict[str, Any]:
+        """
+        Return the canonical rule dictionary for this model.
+
+        Each key is a field name.  Each value is either:
+        * a pipe string (``"str|min:3|max:32"``) for scalar fields, or
+        * a nested rule dict for fields whose type is a FastModel subclass.
+
+        This is the same structure passed to ``compiled.validator`` at
+        class-creation time, so it can be inspected, serialised, or fed
+        directly into another validator.
+
+        Example::
+
+            User.get_rules()
+            # {
+            #   "username": "str|min:3|max:32|nullable",
+            #   "email":    "email",
+            #   "address":  {"street": "str", "city": "str"},
+            # }
+        """
+        return cls.__rule_dict__
+
+    @classmethod
+    def get_validator(cls) -> Callable[[Dict[str, Any]], bool]:
+        """
+        Return the compiled fast-path validator callable for this model.
+
+        The callable accepts a single ``dict`` argument and returns ``True``
+        when the data passes all field rules, ``False`` otherwise.  It is
+        the same function stored on ``__fast_validator__`` and used internally
+        by ``is_valid_data`` and ``from_dict``.
+
+        If the cached ``__fast_validator__`` is ``None``, a fresh validator
+        is compiled from the model's rule dictionary and cached for future calls.
+
+        Example::
+
+            validate = User.get_validator()
+            if validate({"username": "alice", "email": "alice@example.com"}):
+                ...
+        """
+        if cls.__fast_validator__ is not None:
+            return cls.__fast_validator__
+        
+        v = validator(cls.__rule_dict__)
+        cls.__fast_validator__ = v
+        return v
