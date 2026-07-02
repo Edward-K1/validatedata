@@ -80,32 +80,68 @@ v({
 ```
 
 ## Declarative models with `FastModel`
-
+ 
 For structured data that you reuse across your application, `FastModel` gives you a declarative, typed model with compiled validation, rich error messages, and built‑in serialization.
-
+ 
 ```python
-from validatedata import FastModel, Rule
-
+from validatedata import FastModel, Rule, ValidationError
+ 
+class Address(FastModel):
+    street: str = Rule(type="str", min=3, max=64)
+    city: str = Rule("str|re:^[A-Za-z ]+$")   # pipe syntax works too
+ 
 class User(FastModel):
     id: int = Rule(type="int")
     username: str = Rule(type="str", min=3, max=32, pattern=r'^[a-z0-9_]+$')
+    role: str = Rule(type="str", choices=["admin", "member", "guest"])
     email: str = Rule("email")
-    tags: list[str] = Rule(type="list", default=[], init_new=True, max_items=20)
-
+    tags: list[str] = Rule(type="list[str]", default=[], init_new=True, max=20)
+    address: Address   # nested FastModel field
+ 
     def model_check(self, data: dict):
         # cross‑field validation
         if data["id"] < 0:
             raise ValidationError({"id": ["ID must be positive"]})
-
+ 
 # Instantiate – validates on creation
-user = User(id=1, username="alice", email="alice@example.com")
-
+user = User(
+    id=1, username="alice", role="admin", email="alice@example.com",
+    address=Address(street="1 Main St", city="Springfield"),
+)
+ 
 # Serialise to dict
 data = user.to_dict()   # {'id': 1, 'username': 'alice', ...}
-
-user2 = User.from_dict(data) # returns None if data is invalid. set validate=True to throw exceptions
+ 
+# from_dict recursively converts nested dicts (e.g. "address") into their
+# FastModel type. Returns None if data is invalid; set validate=True to raise instead.
+user2 = User.from_dict(data)
 ```
-FastModel combines the speed of compiled rules with the convenience of dataclasses – ideal for API models and configuration objects
+FastModel combines the speed of compiled rules with the convenience of dataclasses – ideal for API models and configuration objects. See the [FastModel reference](docs/fastmodel.rst) for a full walkthrough of every `Rule` option (transforms, custom messages, `default_factory`, nullable fields, and more).
+ 
+### Hot loops / high‑throughput endpoints: `get_validator()` and `get_rules()`
+ 
+Constructing a `User(**kwargs)` instance runs full validation *and* builds an object every call — more than you need when you're just checking millions of dicts in a tight loop or a request‑validation hot path. Pull the compiled boolean validator out once and reuse it:
+ 
+```python
+# Compiled once, cached on the class — subsequent calls return the same function
+validate_user = User.get_validator()
+ 
+for payload in incoming_requests:
+    if not validate_user(payload):
+        reject(payload)
+        continue
+    process(payload)
+```
+ 
+`get_validator()` is the same callable used internally by `is_valid_data` and the default `from_dict(..., validate="check")` path — grab it directly when you want to skip instance construction entirely and just get a `True`/`False` per dict.
+ 
+`get_rules()` returns the canonical rule dict `get_validator()` was compiled from (pipe strings, or nested dicts for `FastModel` fields). Useful for logging, introspection, or feeding the same rules into another `validator()` call:
+ 
+```python
+User.get_rules()
+# {'id': 'int', 'username': 'str|min:3|max:32|re:^[a-z0-9_]+$', 'role': 'str|in:admin,member,guest',
+#  'email': 'email', 'tags': 'list[str]|max:20|nullable', 'address': {'street': 'str|min:3|max:64', 'city': 'str|re:^[A-Za-z ]+$'}}
+```
 
 ## Installation
 
