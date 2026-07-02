@@ -120,7 +120,7 @@ FastModel combines the speed of compiled rules with the convenience of dataclass
  
 ### Hot loops / high‑throughput endpoints: `get_validator()` and `get_rules()`
  
-Constructing a `User(**kwargs)` instance runs full validation *and* builds an object every call — more than you need when you're just checking millions of dicts in a tight loop or a request‑validation hot path. Pull the compiled boolean validator out once and reuse it:
+Constructing a `User(**kwargs)` instance runs full validation *and* builds an object every call which is more than you need when you're just checking millions of dicts in a tight loop or a request‑validation hot path. Get the compiled boolean validator once via get_validator and reuse it:
  
 ```python
 # Compiled once, cached on the class — subsequent calls return the same function
@@ -133,7 +133,7 @@ for payload in incoming_requests:
     process(payload)
 ```
  
-`get_validator()` is the same callable used internally by `is_valid_data` and the default `from_dict(..., validate="check")` path — grab it directly when you want to skip instance construction entirely and just get a `True`/`False` per dict.
+`get_validator()` is the same callable used internally by `is_valid_data` and the default `from_dict(..., validate="check")` path. grab it directly when you want to skip instance construction entirely and just get a `True`/`False` per dict.
  
 `get_rules()` returns the canonical rule dict `get_validator()` was compiled from (pipe strings, or nested dicts for `FastModel` fields). Useful for logging, introspection, or feeding the same rules into another `validator()` call:
  
