@@ -862,7 +862,7 @@ def validate_types(
     mutate: bool = False,  # ignored — type validation cannot transform data
     type_checkers: Optional[Dict[Any, Callable[[Any], bool]]] = None,
     fail_fast: Optional[bool] = None,
-    codegen: bool = False,
+    codegen: bool = True,
     **kwds: Any,
 ) -> Callable:
     """
