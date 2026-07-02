@@ -177,6 +177,10 @@ def _plain_type_or_none(annot: Any, checkers: Dict[Any, Callable[[Any], bool]]) 
     common case of simple annotations (str, int, MyClass, ...).
     """
     if isinstance(annot, type) and annot not in checkers:
+        # In Python 3.9 and 3.10, isinstance(list[int], type) evaluates to True, 
+        # but parameterized generics cannot be used as the second argument to isinstance().
+        if get_origin(annot) is not None:
+            return None
         return annot
     return None
 
@@ -862,7 +866,7 @@ def validate_types(
     mutate: bool = False,  # ignored — type validation cannot transform data
     type_checkers: Optional[Dict[Any, Callable[[Any], bool]]] = None,
     fail_fast: Optional[bool] = None,
-    codegen: bool = True,
+    codegen: bool = False,
     **kwds: Any,
 ) -> Callable:
     """
