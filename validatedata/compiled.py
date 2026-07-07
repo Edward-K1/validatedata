@@ -308,7 +308,7 @@ _TYPE_CHECK: dict[str, Callable[[Any], bool]] = {
     'set':   lambda v: isinstance(v, set),
     'tuple': lambda v: isinstance(v, tuple),
     # non-native basic types
-    'email':  _tc_email,
+    'email':  lambda v: '@' in str(v) and _EMAIL_RE.match(str(v)) is not None,
     'url':    lambda v: _URL_RE.match(str(v)) is not None,
     'ip':     _tc_ip,
     'uuid':   _tc_uuid,
@@ -383,7 +383,7 @@ _ULTRA_TYPE_EXPRS: dict[str, tuple[str, dict[str, Any] | None]] = {
     'list':   ('isinstance({v}, list)', None),
     'set':    ('isinstance({v}, set)', None),
     'tuple':  ('isinstance({v}, tuple)', None),
-    'email':  ('_tc_email({v})', {'_tc_email': _tc_email}),
+    'email':  ('"@" in str({v})' and '_EMAIL_RE.match(str({v})) is not None', None),
     'url':    ('_RE_url.match(str({v})) is not None', {'_RE_url': _URL_RE}),
     'slug':   ('_RE_slug.match(str({v})) is not None', {'_RE_slug': _SLUG_RE}),
     'semver': ('_RE_semver.match(str({v})) is not None', {'_RE_semver': _SEMVER_RE}),
@@ -1070,6 +1070,7 @@ def _ultra_compile_dict(schema: dict) -> Callable[[Any], bool]:
     keeping the entire block inside a single try/except.
     """
     ns: dict[str, Any] = {
+        "_EMAIL_RE": _EMAIL_RE,
         "_tc_date": _tc_date,
         "_is_valid_color": _is_valid_color,
     }
@@ -1429,6 +1430,7 @@ _ULTRA_NATIVE_TYPES: frozenset[str] = frozenset({
 })
 
 _ULTRA_REGEX_TYPES: dict[str, str] = {
+    "email":  "_RE_email",
     "url":    "_RE_url",
     "slug":   "_RE_slug",
     "semver": "_RE_semver",
@@ -1436,7 +1438,6 @@ _ULTRA_REGEX_TYPES: dict[str, str] = {
 }
 
 _ULTRA_FUNC_TYPES: dict[str, str] = {
-    "email": "_tc_email",
     "ip":    "_tc_ip",
     "uuid":  "_tc_uuid",
     "date":  "_tc_date",
