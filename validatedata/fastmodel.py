@@ -660,6 +660,32 @@ class FastModel(metaclass=_FastModelMeta):
                 object.__setattr__(self, fname, None)
                 continue
 
+            # === Nested FastModel handling ===
+            # Recurse into the nested model's own __init__ so its errors are
+            # produced by the same rich diagnostic path. The nested
+            # ValidationError.errors dict is attached as-is (not flattened)
+            # under the field name, matching the shape check() already
+            # produces, since ValidationError now knows how to stringify
+            # nested dicts.
+            if fname in cls.__nested_model_fields__:
+                nested_cls = cls.__nested_model_fields__[fname]
+                if isinstance(val, nested_cls):
+                    object.__setattr__(self, fname, val)
+                elif isinstance(val, dict):
+                    try:
+                        nested_instance = nested_cls(**val)
+                        object.__setattr__(self, fname, nested_instance)
+                    except ValidationError as nested_exc:
+                        if nested_exc.errors:
+                            errors[fname] = nested_exc.errors
+                        else:
+                            _add_error(fname, [str(nested_exc)])
+                    except Exception as e:
+                        _add_error(fname, [f"nested model error: {e}"])
+                else:
+                    _add_error(fname, ["expected dict for nested model"])
+                continue
+
             if cr.fast_validator(val):
                 if cr.transform is not None:
                     try:
@@ -690,7 +716,10 @@ class FastModel(metaclass=_FastModelMeta):
             except ValidationError as exc:
                 if exc.errors:
                     for field, msgs in exc.errors.items():
-                        _add_error(field, msgs)
+                        if isinstance(msgs, dict):
+                            errors[field] = msgs
+                        else:
+                            _add_error(field, msgs)
                 else:
                     _add_error("__model__", [str(exc)])
             except Exception as exc:
@@ -941,21 +970,45 @@ class FastModel(metaclass=_FastModelMeta):
     # ------------------------------------------------------------------
 
     @classmethod
-    def check(cls, data: Dict[str, Any]) -> Tuple[bool, Dict[str, List[str]]]:
+    def check(cls, data: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """
-        ...
-        Returns ``(ok, errors)`` — never raises.
+        Partial validation without instantiation.
+
+        Returns ``(ok, errors)`` — never raises.  Nested FastModel fields are
+        recursively validated; their errors are returned as a nested dict
+        (``{"address": {"zipcode": ["..."]}}``) rather than a flat list.
 
         Example::
 
             ok, errors = User.check({"username": "x"})
             # ok=False, errors={"username": ["value is too short (minimum length: 3)"]}
+
+            ok, errors = Person.check({"name": "Alice", "address": {"zipcode": "bad"}})
+            # ok=False, errors={"address": {"zipcode": ["..."]}}
         """
-        errors: Dict[str, List[str]] = {}
+        errors: Dict[str, Any] = {}
         for fname, val in data.items():
             if fname not in cls.__validated_fields__:
                 errors.setdefault(fname, []).append("unknown field")
                 continue
+
+            # === Nested FastModel handling ===
+            # Recurse into the nested model's own `check` so its errors come
+            # back as a nested dict (field -> {subfield -> [msgs]}) instead
+            # of a single generic "expected dict"-style message.
+            if fname in cls.__nested_model_fields__:
+                nested_cls = cls.__nested_model_fields__[fname]
+                cr = cls.__compiled_fields__[fname]
+                if isinstance(val, dict):
+                    nested_ok, nested_errors = nested_cls.check(val)
+                    if not nested_ok:
+                        errors[fname] = nested_errors
+                elif val is None and cr.nullable:
+                    continue
+                else:
+                    errors.setdefault(fname, []).append("expected dict for nested model")
+                continue
+
             cr = cls.__compiled_fields__[fname]
             if val is None and cr.nullable:
                 continue

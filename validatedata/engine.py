@@ -30,11 +30,17 @@ class ValidationError(Exception):
 
     Attributes
     ----------
-    errors : dict[str, list[str]]
+    errors : dict[str, list[str] | dict]
         Structured errors keyed by field name.  Model-level errors (from
         ``model_check``) are stored under the ``"__model__"`` key.
         Always present; empty dict when the exception was raised with a
         plain string (e.g. from non-FastModel callers).
+
+        A value is normally ``list[str]``.  For a field backed by a nested
+        FastModel, the value may instead be a nested ``dict`` with the same
+        shape (recursively), so a failure two levels deep still reads as
+        ``exc.errors["address"]["zipcode"]``. ``str(exc)`` flattens nested
+        dicts using dotted field paths ("address.zipcode: ...").
 
     Examples
     --------
@@ -49,20 +55,40 @@ class ValidationError(Exception):
             str(exc)
             # "username: value is too short (minimum length: 3)\n
             #  email: value is not a valid email address"
+
+        try:
+            Person(name="Alice", address={"zipcode": "bad"})
+        except ValidationError as exc:
+            exc.errors
+            # {"address": {"zipcode": ["value does not match required pattern"]}}
+            str(exc)
+            # "address.zipcode: value does not match required pattern"
     """
 
     def __init__(self, message_or_errors, /):
         if isinstance(message_or_errors, dict):
-            self.errors: Dict[str, List[str]] = message_or_errors
+            self.errors: Dict[str, Any] = message_or_errors
             # Flatten to a human-readable string for str(exc) and logging.
-            parts = []
-            for field, messages in message_or_errors.items():
+            # Nested-model fields may hold a dict of their own errors
+            # (rather than a flat list of message strings); recurse into
+            # those using a dotted field path so str(exc) still reads as a
+            # normal flat error list regardless of nesting depth.
+            parts: List[str] = []
+
+            def _flatten(field_path: str, messages: Any) -> None:
+                if isinstance(messages, dict):
+                    for sub_field, sub_messages in messages.items():
+                        _flatten(f"{field_path}.{sub_field}", sub_messages)
+                    return
                 for msg in messages:
-                    parts.append(msg if field == "__model__" else f"{field}: {msg}")
+                    parts.append(msg if field_path == "__model__" else f"{field_path}: {msg}")
+
+            for field, messages in message_or_errors.items():
+                _flatten(field, messages)
             super().__init__("\n".join(parts))
         else:
             # Plain string — legacy / non-FastModel raise sites.
-            self.errors: Dict[str, List[str]] = {}
+            self.errors: Dict[str, Any] = {}
             super().__init__(str(message_or_errors))
 
 
