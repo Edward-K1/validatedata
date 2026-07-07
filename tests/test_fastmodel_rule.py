@@ -245,9 +245,190 @@ class TestFastModelNestedSerialisation(unittest.TestCase):
         self.assertEqual(original.address.zipcode, reconstructed.address.zipcode)
 
 
+class OptionalAddress(FastModel):
+    street: str = Rule(min=3, nullable=True)
+
+
+class Owner(FastModel):
+    name: str
+    address: OptionalAddress = Rule(nullable=True)
+
+
+class Inventory(FastModel):
+    item: str
+    address: Address
+
+    def model_check(self, data):
+        # Simulate an implementer re-raising structured errors sourced
+        # from elsewhere (e.g. an external lookup), rather than raising
+        # a plain string.
+        raise ValidationError({"address": {"city": ["city is on a blocklist"]}})
+
+
+class Inner(FastModel):
+    code: str = Rule(pattern=r'^\d{3}$')
+
+
+class Middle(FastModel):
+    inner: Inner
+
+
+class Outer(FastModel):
+    middle: Middle
+
+
+class TestFastModelNestedErrors(unittest.TestCase):
+    """
+    Regression tests for nested FastModel error reporting.
+
+    Historically, ``FastModel.__init__`` and ``FastModel.check`` treated
+    nested-model fields as plain scalars: a bad nested dict was either
+    silently accepted unvalidated (stored as a raw dict, see
+    ``test_init_previously_silently_accepted_invalid_nested_dict`` for the
+    documented pre-fix behaviour) or reported as a single opaque
+    "expected dict" message, with no indication of which sub-field failed.
+    """
+
+    def test_check_reports_nested_field_errors(self):
+        ok, errors = Person.check({
+            "name": "Alice",
+            "address": {"street": "ok st", "city": "A", "zipcode": "bad"},
+        })
+        self.assertFalse(ok)
+        self.assertIn("address", errors)
+        self.assertIsInstance(errors["address"], dict)
+        self.assertIn("city", errors["address"])
+        self.assertIn("zipcode", errors["address"])
+        self.assertNotIn("street", errors["address"])  # street was valid
+
+    def test_check_nested_field_valid_produces_no_error(self):
+        ok, errors = Person.check({
+            "name": "Alice",
+            "address": {"street": "123 Main St", "city": "Springfield", "zipcode": "12345"},
+        })
+        self.assertTrue(ok)
+        self.assertEqual(errors, {})
+
+    def test_check_nested_field_wrong_type(self):
+        ok, errors = Person.check({"name": "Alice", "address": "not-a-dict"})
+        self.assertFalse(ok)
+        self.assertEqual(errors["address"], ["expected dict for nested model"])
+
+    def test_check_nested_field_none_when_nullable(self):
+        ok, errors = Owner.check({"name": "Alice", "address": None})
+        self.assertTrue(ok)
+        self.assertEqual(errors, {})
+
+    def test_init_raises_with_nested_error_dict(self):
+        with self.assertRaises(ValidationError) as ctx:
+            Person(
+                name="Alice",
+                address={"street": "ok st", "city": "A", "zipcode": "bad"},
+            )
+        errors = ctx.exception.errors
+        self.assertIn("address", errors)
+        self.assertIsInstance(errors["address"], dict)
+        self.assertIn("city", errors["address"])
+        self.assertIn("zipcode", errors["address"])
+        self.assertNotIn("street", errors["address"])  # street was valid
+
+    def test_init_nested_errors_stringify_with_dotted_paths(self):
+        # ValidationError.errors nests, but str(exc) still flattens to a
+        # readable, dotted, line-per-message representation.
+        with self.assertRaises(ValidationError) as ctx:
+            Person(
+                name="Alice",
+                address={"street": "ok st", "city": "A", "zipcode": "bad"},
+            )
+        message = str(ctx.exception)
+        self.assertIn("address.city:", message)
+        self.assertIn("address.zipcode:", message)
+        self.assertNotIn("address.street:", message)
+
+    def test_init_succeeds_with_valid_nested_dict(self):
+        person = Person(
+            name="Alice",
+            address={"street": "123 Main St", "city": "Springfield", "zipcode": "12345"},
+        )
+        self.assertIsInstance(person.address, Address)
+        self.assertEqual(person.address.city, "Springfield")
+
+    def test_init_accepts_existing_nested_instance(self):
+        addr = Address(street="456 Oak Ave", city="Metropolis", zipcode="67890")
+        person = Person(name="Bob", address=addr)
+        self.assertIs(person.address, addr)
+
+    def test_init_nested_field_wrong_type(self):
+        with self.assertRaises(ValidationError) as ctx:
+            Person(name="Alice", address="not-a-dict")
+        self.assertEqual(
+            ctx.exception.errors["address"], ["expected dict for nested model"]
+        )
+
+    def test_init_multiple_top_level_and_nested_errors_coexist(self):
+        with self.assertRaises(ValidationError) as ctx:
+            # 'name' omitted entirely -> required-field error at top level.
+            Person(address={"street": "x", "city": "y", "zipcode": "bad"})
+        errors = ctx.exception.errors
+        # Top-level field error still reported as a flat list...
+        self.assertIn("name", errors)
+        self.assertEqual(errors["name"], ["field is required"])
+        # ...alongside nested field errors, as a nested dict.
+        self.assertIsInstance(errors["address"], dict)
+        self.assertIn("street", errors["address"])
+        self.assertIn("zipcode", errors["address"])
+
+    def test_deeply_nested_check_returns_nested_dicts_at_each_level(self):
+        ok, errors = Outer.check({"middle": {"inner": {"code": "bad"}}})
+        self.assertFalse(ok)
+        self.assertEqual(
+            errors, {"middle": {"inner": {"code": ["value does not match required pattern"]}}}
+        )
+
+    def test_init_previously_silently_accepted_invalid_nested_dict(self):
+        """
+        Documents the bug this test class guards against: before the fix,
+        constructing a model with an invalid nested dict neither raised nor
+        coerced the value into the nested model type -- it silently stored
+        the raw, unvalidated dict. This test locks in the corrected
+        behaviour: an invalid nested dict must now raise.
+        """
+        with self.assertRaises(ValidationError):
+            Person(name="Alice", address={"street": "x", "city": "y", "zipcode": "bad"})
+
+    def test_flat_errors_unaffected_by_nested_support(self):
+        # A plain (non-nested-model) validation failure must still produce
+        # a flat dict[str, list[str]] and stringify exactly as before --
+        # nested-dict support in ValidationError must not change behaviour
+        # for models with no nested fields.
+        with self.assertRaises(ValidationError) as ctx:
+            User(id=1, username="a", email="not-an-email")
+        errors = ctx.exception.errors
+        for msgs in errors.values():
+            self.assertIsInstance(msgs, list)
+        message = str(ctx.exception)
+        self.assertIn("username:", message)
+        self.assertIn("email:", message)
+
+    def test_model_check_raising_nested_dict_error_is_preserved(self):
+        # model_check implementers may re-raise a caught nested
+        # ValidationError with a nested-dict payload; that shape must be
+        # preserved (not corrupted by list-based error merging).
+        with self.assertRaises(ValidationError) as ctx:
+            Inventory(
+                item="widget",
+                address={"street": "123 Main St", "city": "Springfield", "zipcode": "12345"},
+            )
+        errors = ctx.exception.errors
+        self.assertIsInstance(errors["address"], dict)
+        self.assertEqual(errors["address"]["city"], ["city is on a blocklist"])
+        self.assertIn("address.city:", str(ctx.exception))
+
+
 class TestFastModelInheritance(unittest.TestCase):
 
     class Base(FastModel):
+
         id: int
 
     class Derived(Base):
