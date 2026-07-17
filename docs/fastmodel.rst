@@ -274,6 +274,34 @@ Schema introspection
 
 ----
 
+**OpenAPI Schema Generation**
+-----------------------------------------------------
+
+For seamless integration with web frameworks (FastAPI, Flask-OpenAPI, Starlette, etc.), use `openapi_schema()`. It converts the model into a full **OpenAPI 3.0-compatible JSON Schema**.
+
+This is the recommended way to power automatic API documentation, request/response validation, and client generation.
+
+.. code-block:: python
+
+   from validatedata import FastModel, Rule
+
+   class User(FastModel):
+       id: int = Rule(type="int", ge=1)
+       username: str = Rule(min=3, max=32, pattern=r'^[a-z0-9_]+$')
+       email: str = Rule("email")
+       status: str = Rule(choices=["active", "inactive", "suspended"])
+       tags: list[str] = Rule(type="list[str]" default=[], init_new=True, max=20)
+       shipping_address: "Address"  # forward ref / nested model
+
+   class Address(FastModel):
+       street: str = Rule(min=3, max=64)
+       postal_code: str = Rule(pattern=r'^[0-9]{4,10}$', nullable=True)
+
+   # Generate OpenAPI schema
+   openapi_schema = User.openapi_schema()
+  ---- 
+
+
 Rule dict and compiled validator access
 ----------------------------------------
 

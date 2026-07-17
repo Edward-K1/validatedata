@@ -490,6 +490,12 @@ class _FastModelMeta(type):
                 origin = get_origin(annot) or annot
                 if origin in (int, float, bool, str, list, tuple, set, dict):
                     rule_obj.kwargs["type"] = origin.__name__
+                    
+                elif isinstance(origin, str):
+                    # Handle string annotations like "int" or "list[str]"
+                    base_str = origin.split("[")[0].strip()
+                    if base_str in ("int", "float", "bool", "str", "list", "tuple", "set", "dict"):
+                        rule_obj.kwargs["type"] = base_str
 
             cls.__compiled_fields__[field_name] = _compiled_rule_for(rule_obj)
 
@@ -499,14 +505,19 @@ class _FastModelMeta(type):
         except Exception:
             cls.__resolved_hints__ = dict(cls.__validated_fields__)
 
-        cls.__nested_model_fields__ = {
-            fname: hint
-            for fname, hint in cls.__resolved_hints__.items()
-            if fname in cls.__validated_fields__
-            and isinstance(hint, type)
-            and issubclass(hint, FastModel)
-            and hint is not FastModel
-        }
+        cls.__nested_model_fields__ = {}
+        for fname, hint in cls.__resolved_hints__.items():
+            if fname in cls.__validated_fields__:
+                # Try to resolve un-evaluable string annotations (common for local classes)
+                if isinstance(hint, str):
+                    # Search newest subclasses first
+                    for sub in reversed(FastModel.__subclasses__()):
+                        if sub.__name__ == hint:
+                            hint = sub
+                            break
+                            
+                if isinstance(hint, type) and issubclass(hint, FastModel) and hint is not FastModel:
+                    cls.__nested_model_fields__[fname] = hint
 
         # --- Build __field_meta__ for fast construction ---
         cls.__field_meta__ = tuple(
@@ -900,16 +911,8 @@ class FastModel(metaclass=_FastModelMeta):
 
         # --- validate=True: full __init__ path, raises on bad data ----------
         if validate is True:
-            # Recurse into nested FastModel fields first so __init__ receives
-            # proper model instances (which it can validate) rather than raw
-            # dicts (which it would accept unchecked).
-            nested_fields = cls.__nested_model_fields__
-            if nested_fields:
-                data = {
-                    k: nested_fields[k].from_dict(v, validate=True)
-                    if k in nested_fields and isinstance(v, dict) else v
-                    for k, v in data.items()
-                }
+            # Simply delegate to __init__; it already contains the logic to recursively 
+            # instantiate nested models from dicts and properly nest ValidationErrors.
             return cls(**data)
 
         if validate == "check":
@@ -1058,6 +1061,292 @@ class FastModel(metaclass=_FastModelMeta):
                 "nullable": cls.__compiled_fields__[fname].nullable,
             }
         return {"model": cls.__name__, "fields": fields}
+        
+        
+    @classmethod
+    def openapi_schema(cls, version: str = "3.0") -> Dict[str, Any]:
+        """
+        Generate an OpenAPI compatible schema object for this FastModel.
+        
+        Args:
+            version: Target OpenAPI version, either "3.0" or "3.1". Defaults to "3.0".
+        """
+        from .rule import _MISSING
+        
+        if version not in ("3.0", "3.1"):
+            raise ValueError("openapi_schema version must be '3.0' or '3.1'")
+            
+        schema: Dict[str, Any] = {
+            "type": "object",
+            "title": cls.__name__,
+            "properties": {},
+        }
+        required: List[str] = []
+
+        for fname, rule_obj in cls.__field_rules__.items():
+            cr = cls.__compiled_fields__.get(fname)
+            field_schema: Dict[str, Any] = {"title": fname}
+
+            # Required, Default, Nullable
+            is_nullable = cr.nullable if cr else rule_obj.nullable
+            if not rule_obj.has_default and not is_nullable:
+                required.append(fname)
+            elif rule_obj.default is not _MISSING and not callable(rule_obj.default):
+                field_schema["default"] = rule_obj.default
+
+            if is_nullable and version == "3.0":
+                field_schema["nullable"] = True
+
+            # Extract description (from kwargs['msg'] or cr.custom_msg)
+            description = rule_obj.kwargs.get("msg")
+            if cr and not description:
+                description = getattr(cr, "custom_msg", None)
+            if description:
+                field_schema["description"] = str(description)
+
+            # Nested Models
+            if fname in getattr(cls, '__nested_model_fields__', {}):
+                nested_cls = cls.__nested_model_fields__[fname]
+                nested_schema = nested_cls.openapi_schema(version=version)
+                
+                # Merge nested schema while preserving field-level metadata (like description)
+                for k, v in nested_schema.items():
+                    if k not in field_schema:
+                        field_schema[k] = v
+                        
+                # Handle OpenAPI 3.1 nullability for nested objects
+                if is_nullable and version == "3.1":
+                    if "type" in field_schema and isinstance(field_schema["type"], str):
+                        field_schema["type"] = [field_schema["type"], "null"]
+                        
+                schema["properties"][fname] = field_schema
+                continue
+
+            # Determine base type and map to OpenAPI type + format
+            base_type = cls._get_base_type(rule_obj, cr)
+            openapi_type, openapi_format = cls._map_type_to_openapi(base_type)
+            
+            if openapi_type:
+                # OpenAPI 3.1 uses JSON Schema type arrays for nullability
+                if is_nullable and version == "3.1":
+                    field_schema["type"] = [openapi_type, "null"]
+                else:
+                    field_schema["type"] = openapi_type
+                    
+            if openapi_format:
+                field_schema["format"] = openapi_format
+
+            # Array items
+            if openapi_type == "array":
+                items_schema = cls._get_array_items_schema(rule_obj, cr)
+                if items_schema:
+                    field_schema["items"] = items_schema
+
+            # Constraints
+            cls._add_constraints_to_schema(
+                field_schema, rule_obj, cr, openapi_type, 
+                version=version, is_nullable=is_nullable
+            )
+
+            schema["properties"][fname] = field_schema
+
+        if required:
+            schema["required"] = required
+
+        return schema
+
+    @classmethod
+    def _get_base_type(cls, rule_obj, cr) -> str:
+        """Extract base type preferring compiled metadata, then kwargs, then rule string."""
+        if cr and getattr(cr, "type_name", None):
+            return cr.type_name.lower()
+            
+        if "type" in rule_obj.kwargs:
+            return str(rule_obj.kwargs["type"]).lower()
+
+        try:
+            rule_str = rule_obj._resolve_rule_string() or getattr(rule_obj, 'rule', '')
+            if rule_str:
+                token = str(rule_str).split("|")[0].strip()
+                raw = token.split(":")[0].split("[")[0]
+                return raw.lower()
+        except Exception:
+            pass
+
+        return "string"
+
+    @classmethod
+    def _map_type_to_openapi(cls, base_type: str) -> tuple[Optional[str], Optional[str]]:
+        """Map FastModel types to OpenAPI types and formats."""
+        type_map = {
+            "int": ("integer", None),
+            "float": ("number", None),
+            "number": ("number", None),
+            "bool": ("boolean", None),
+            "boolean": ("boolean", None),
+            "list": ("array", None),
+            "tuple": ("array", None),
+            "set": ("array", None),
+            "dict": ("object", None),
+            "object": ("object", None),
+            "email": ("string", "email"),
+            "url": ("string", "uri"),
+            "uuid": ("string", "uuid"),
+            "date": ("string", "date"),
+            "datetime": ("string", "date-time"),
+            "ip": ("string", "ipv4"),
+            "ipv4": ("string", "ipv4"),
+            "ipv6": ("string", "ipv6"),
+        }
+        return type_map.get(base_type, ("string", None))
+
+    @classmethod
+    def _get_array_items_schema(cls, rule_obj, cr) -> Optional[Dict[str, Any]]:
+        """Extract items schema for list[T] style declarations."""
+        try:
+            rule_str = getattr(cr, "rule_str", None) or rule_obj._resolve_rule_string()
+            if not rule_str:
+                return None
+                
+            first_token = rule_str.split("|")[0].strip()
+            if "[" not in first_token or not first_token.endswith("]"):
+                return None
+
+            inner = first_token.split("[", 1)[1].rsplit("]", 1)[0].strip()
+            if not inner:
+                return {}
+
+            inner_type, inner_format = cls._map_type_to_openapi(inner.lower())
+            items: Dict[str, Any] = {}
+            if inner_type:
+                items["type"] = inner_type
+            if inner_format:
+                items["format"] = inner_format
+            return items
+        except Exception:
+            return None
+
+    @classmethod
+    def _add_constraints_to_schema(
+        cls,
+        field_schema: Dict[str, Any],
+        rule_obj,
+        cr,
+        openapi_type: Optional[str],
+        version: str = "3.0",
+        is_nullable: bool = False
+    ):
+        """Add constraints extracting from both kwargs and compiled metadata."""
+        compiled_constraints = {}
+        if cr and hasattr(cr, "validator_names") and hasattr(cr, "validator_args"):
+            for name, arg in zip(cr.validator_names, cr.validator_args):
+                compiled_constraints[name] = arg
+
+        # Resolve Min / Max Bounds (including 'between' ranges)
+        min_val = rule_obj.kwargs.get("min")
+        max_val = rule_obj.kwargs.get("max")
+        
+        if min_val is None and "min" in compiled_constraints:
+            min_val = compiled_constraints["min"]
+        if max_val is None and "max" in compiled_constraints:
+            max_val = compiled_constraints["max"]
+            
+        between_val = rule_obj.kwargs.get("between")
+        if between_val is not None:
+            if isinstance(between_val, (list, tuple)) and len(between_val) == 2:
+                if min_val is None: min_val = between_val[0]
+                if max_val is None: max_val = between_val[1]
+        elif "between" in compiled_constraints:
+            parts = str(compiled_constraints["between"]).split(",", 1)
+            if len(parts) == 2:
+                if min_val is None: min_val = parts[0].strip()
+                if max_val is None: max_val = parts[1].strip()
+
+        # Apply resolved Min / Max based on OpenAPI Type
+        if openapi_type in ("integer", "number"):
+            coercer = int if openapi_type == "integer" else float
+            if min_val is not None:
+                try:
+                    field_schema["minimum"] = coercer(min_val)
+                except (ValueError, TypeError):
+                    pass
+            if max_val is not None:
+                try:
+                    field_schema["maximum"] = coercer(max_val)
+                except (ValueError, TypeError):
+                    pass
+        elif openapi_type == "string":
+            if min_val is not None:
+                try:
+                    field_schema["minLength"] = int(min_val)
+                except (ValueError, TypeError):
+                    pass
+            if max_val is not None:
+                try:
+                    field_schema["maxLength"] = int(max_val)
+                except (ValueError, TypeError):
+                    pass
+        elif openapi_type == "array":
+            if min_val is not None:
+                try:
+                    field_schema["minItems"] = int(min_val)
+                except (ValueError, TypeError):
+                    pass
+            if max_val is not None:
+                try:
+                    field_schema["maxItems"] = int(max_val)
+                except (ValueError, TypeError):
+                    pass
+
+        # Resolve Length Constraints
+        length_val = rule_obj.kwargs.get("length")
+        if length_val is None and "length" in compiled_constraints:
+            length_val = compiled_constraints["length"]
+
+        if length_val is not None:
+            try:
+                length_int = int(length_val)
+                if openapi_type == "string":
+                    field_schema["minLength"] = field_schema["maxLength"] = length_int
+                elif openapi_type == "array":
+                    field_schema["minItems"] = field_schema["maxItems"] = length_int
+            except (ValueError, TypeError):
+                pass
+
+        # Resolve Enum / Choices
+        choices = rule_obj.kwargs.get("choices")
+        if choices is None and "in" in compiled_constraints:
+            raw_in = compiled_constraints["in"]
+            choices = [c.strip() for c in str(raw_in).split(",")]
+
+        if choices is not None:
+            if not isinstance(choices, (list, tuple, set)):
+                choices = [choices]
+            else:
+                choices = list(choices)
+            
+            # Coerce enums dynamically so swagger UI sends correct JSON types
+            if openapi_type == "integer":
+                choices = [int(x) for x in choices if str(x).lstrip('-').isdigit()]
+            elif openapi_type == "number":
+                choices = [float(x) for x in choices if str(x).replace('.', '', 1).lstrip('-').isdigit()]
+            else:
+                choices = [str(x) for x in choices]
+                
+            # If 3.1 and nullable, enum MUST explicitly permit None (null)
+            if version == "3.1" and is_nullable and None not in choices:
+                choices.append(None)
+                
+            if choices:
+                field_schema["enum"] = choices
+
+        # Resolve Regex Patterns
+        pattern = rule_obj.kwargs.get("pattern")
+        if pattern is None and "re" in compiled_constraints:
+            pattern = compiled_constraints["re"]
+
+        if pattern is not None:
+            field_schema["pattern"] = str(pattern)
             
     @classmethod
     def get_rules(cls) -> Dict[str, Any]:

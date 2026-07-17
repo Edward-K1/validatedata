@@ -292,9 +292,9 @@ def _tc_phone_e164(v: Any) -> bool:
     return bool(_PHONE_E164_RE.match(str(v).strip()))
 
 def _tc_email(v: Any) -> bool:
-    if not v or "@" not in str(v) or len(str(v)) > 254:
+    if not v or "@" not in str(v) or len(v) > 254:
         return False
-    return _EMAIL_RE.match(str(v)) is not None
+    return _EMAIL_RE.match(v) is not None
 
 
 _TYPE_CHECK: dict[str, Callable[[Any], bool]] = {
@@ -308,7 +308,7 @@ _TYPE_CHECK: dict[str, Callable[[Any], bool]] = {
     'set':   lambda v: isinstance(v, set),
     'tuple': lambda v: isinstance(v, tuple),
     # non-native basic types
-    'email':  lambda v: '@' in str(v) and _EMAIL_RE.match(str(v)) is not None,
+    'email':  lambda v: '@' in str(v) and _EMAIL_RE.match(v) is not None,
     'url':    lambda v: _URL_RE.match(str(v)) is not None,
     'ip':     _tc_ip,
     'uuid':   _tc_uuid,
@@ -383,11 +383,11 @@ _ULTRA_TYPE_EXPRS: dict[str, tuple[str, dict[str, Any] | None]] = {
     'list':   ('isinstance({v}, list)', None),
     'set':    ('isinstance({v}, set)', None),
     'tuple':  ('isinstance({v}, tuple)', None),
-    'email':  ('"@" in str({v})' and '_EMAIL_RE.match(str({v})) is not None', None),
+    'email':  ('"@" in str({v})' and '_EMAIL_RE.match({v}) is not None', None),
     'url':    ('_RE_url.match(str({v})) is not None', {'_RE_url': _URL_RE}),
     'slug':   ('_RE_slug.match(str({v})) is not None', {'_RE_slug': _SLUG_RE}),
     'semver': ('_RE_semver.match(str({v})) is not None', {'_RE_semver': _SEMVER_RE}),
-    'phone':  ('_RE_phone.match(str({v}).strip()) is not None', {'_RE_phone': _PHONE_E164_RE}),
+    'phone':  ('_RE_phone.match(str({v})) is not None', {'_RE_phone': _PHONE_E164_RE}),
     'ip':     ('_tc_ip({v})', {'_tc_ip': _tc_ip}),
     'uuid':   ('_tc_uuid({v})', {'_tc_uuid': _tc_uuid}),
     'date':   ('_tc_date({v})', {'_tc_date': _tc_date}),
@@ -1085,7 +1085,6 @@ def _ultra_compile_dict(schema: dict) -> Callable[[Any], bool]:
         _counter[0] += 1
         return f"_v{_counter[0]}"
         
-
 
     def _build_exprs(var: str, type_tok: str, modifiers: list[str]) -> list[str]:
         exprs = []
@@ -1979,10 +1978,12 @@ def _make_ultra_fused_validator(schema: dict) -> Callable[[Any], bool]:
 
     if used_types & frozenset(_ULTRA_REGEX_TYPES):
         _regex_map = {
+            "_RE_email": _EMAIL_RE,
             "_RE_url":    _URL_RE,
             "_RE_slug":   _SLUG_RE,
             "_RE_semver": _SEMVER_RE,
             "_RE_phone":  _PHONE_E164_RE,
+            
         }
         for type_name, ns_key in _ULTRA_REGEX_TYPES.items():
             if type_name in used_types:
@@ -2014,7 +2015,7 @@ def fast_validator(
     schema: dict,
     *,
     codegen: bool = True,
-    compile_timeout: float = 0.5,
+    compile_timeout: float = 5.0,
 ) -> Callable[[Any], bool]:
     """Return the fastest available validator for *schema*.
 
@@ -2037,7 +2038,7 @@ def fast_validator(
         back to the regular codegen path only when necessary.
         When False, skip all codegen and use the loop-based validator.
     compile_timeout:
-        Wall-clock seconds budget for ultra-fuse compilation (default 500 ms).
+        Wall-clock seconds budget for ultra-fuse compilation (default 5000 ms).
         Only consulted when ``codegen=True``.
 
     Returns

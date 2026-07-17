@@ -142,6 +142,7 @@ User.get_rules()
 # {'id': 'int', 'username': 'str|min:3|max:32|re:^[a-z0-9_]+$', 'role': 'str|in:admin,member,guest',
 #  'email': 'email', 'tags': 'list[str]|max:20|nullable', 'address': {'street': 'str|min:3|max:64', 'city': 'str|re:^[A-Za-z ]+$'}}
 ```
+`openapi_schema()` returns the openapi 3.0 json schema. You can get version 3.1 by supplying the version parameter, i.e `User.openapi_schema(version="3.1")`
 
 ## Installation
 
