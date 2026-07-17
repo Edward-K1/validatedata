@@ -490,6 +490,12 @@ class _FastModelMeta(type):
                 origin = get_origin(annot) or annot
                 if origin in (int, float, bool, str, list, tuple, set, dict):
                     rule_obj.kwargs["type"] = origin.__name__
+                    
+                elif isinstance(origin, str):
+                    # Handle string annotations like "int" or "list[str]"
+                    base_str = origin.split("[")[0].strip()
+                    if base_str in ("int", "float", "bool", "str", "list", "tuple", "set", "dict"):
+                        rule_obj.kwargs["type"] = base_str
 
             cls.__compiled_fields__[field_name] = _compiled_rule_for(rule_obj)
 
@@ -499,14 +505,19 @@ class _FastModelMeta(type):
         except Exception:
             cls.__resolved_hints__ = dict(cls.__validated_fields__)
 
-        cls.__nested_model_fields__ = {
-            fname: hint
-            for fname, hint in cls.__resolved_hints__.items()
-            if fname in cls.__validated_fields__
-            and isinstance(hint, type)
-            and issubclass(hint, FastModel)
-            and hint is not FastModel
-        }
+        cls.__nested_model_fields__ = {}
+        for fname, hint in cls.__resolved_hints__.items():
+            if fname in cls.__validated_fields__:
+                # Try to resolve un-evaluable string annotations (common for local classes)
+                if isinstance(hint, str):
+                    # Search newest subclasses first
+                    for sub in reversed(FastModel.__subclasses__()):
+                        if sub.__name__ == hint:
+                            hint = sub
+                            break
+                            
+                if isinstance(hint, type) and issubclass(hint, FastModel) and hint is not FastModel:
+                    cls.__nested_model_fields__[fname] = hint
 
         # --- Build __field_meta__ for fast construction ---
         cls.__field_meta__ = tuple(
