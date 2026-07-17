@@ -911,16 +911,8 @@ class FastModel(metaclass=_FastModelMeta):
 
         # --- validate=True: full __init__ path, raises on bad data ----------
         if validate is True:
-            # Recurse into nested FastModel fields first so __init__ receives
-            # proper model instances (which it can validate) rather than raw
-            # dicts (which it would accept unchecked).
-            nested_fields = cls.__nested_model_fields__
-            if nested_fields:
-                data = {
-                    k: nested_fields[k].from_dict(v, validate=True)
-                    if k in nested_fields and isinstance(v, dict) else v
-                    for k, v in data.items()
-                }
+            # Simply delegate to __init__; it already contains the logic to recursively 
+            # instantiate nested models from dicts and properly nest ValidationErrors.
             return cls(**data)
 
         if validate == "check":
