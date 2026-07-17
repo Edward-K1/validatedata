@@ -698,6 +698,100 @@ class TestFastModelMixingKwargsAndPipe(unittest.TestCase):
         # "  ALICE  " -> strip (pipe) -> "ALICE" -> strip (kwarg, ignored) -> lower -> "alice"
         m = DoubleStripModel(name="  ALICE  ")
         self.assertEqual(m.name, "alice")
+        
+        
+class TestFastModelOpenAPISchema(unittest.TestCase):
+    """Tests for OpenAPI schema generation, types, constraints, and versions."""
+
+    def test_basic_types_and_formats(self):
+        class APIUser(FastModel):
+            id: int
+            email: str = Rule("email")
+            is_active: bool = Rule(default=True)
+
+        schema = APIUser.openapi_schema()
+        
+        self.assertEqual(schema["type"], "object")
+        self.assertEqual(schema["title"], "APIUser")
+        
+        # 'is_active' has a default, so it shouldn't be required
+        self.assertEqual(schema["required"], ["id", "email"])
+        
+        props = schema["properties"]
+        self.assertEqual(props["id"]["type"], "integer")
+        self.assertEqual(props["email"]["type"], "string")
+        self.assertEqual(props["email"]["format"], "email")
+        self.assertEqual(props["is_active"]["type"], "boolean")
+        self.assertEqual(props["is_active"]["default"], True)
+
+    def test_constraints_mapping(self):
+        class Product(FastModel):
+            name: str = Rule(min=3, max=50, pattern="^[A-Z]")
+            price: float = Rule(min=0.01)
+            # Must explicitly pass "list[str]" so inner type logic extracts "string"
+            tags: list[str] = Rule("list[str]", min=1, max=5)
+            status: str = Rule(choices=["active", "archived"])
+            code: int = Rule(choices=[100, 200])
+
+        schema = Product.openapi_schema()
+        props = schema["properties"]
+        
+        self.assertEqual(props["name"]["minLength"], 3)
+        self.assertEqual(props["name"]["maxLength"], 50)
+        self.assertEqual(props["name"]["pattern"], "^[A-Z]")
+        
+        self.assertEqual(props["price"]["type"], "number")
+        self.assertEqual(props["price"]["minimum"], 0.01)
+
+        self.assertEqual(props["tags"]["type"], "array")
+        self.assertEqual(props["tags"]["items"]["type"], "string")
+        self.assertEqual(props["tags"]["minItems"], 1)
+        self.assertEqual(props["tags"]["maxItems"], 5)
+
+        self.assertEqual(props["status"]["enum"], ["active", "archived"])
+        self.assertEqual(props["code"]["enum"], [100, 200])
+
+    def test_nested_model_schema(self):
+        class Coordinate(FastModel):
+            lat: float
+            lng: float
+            
+        class Location(FastModel):
+            name: str
+            coord: Coordinate
+            
+        schema = Location.openapi_schema()
+        props = schema["properties"]
+        
+        self.assertIn("coord", props)
+        self.assertEqual(props["coord"]["type"], "object")
+        self.assertEqual(props["coord"]["properties"]["lat"]["type"], "number")
+        self.assertEqual(props["coord"]["required"], ["lat", "lng"])
+
+    def test_openapi_versions_nullability_and_enums(self):
+        class Profile(FastModel):
+            bio: str = Rule(nullable=True)
+            status: str = Rule(choices=["online", "offline"], nullable=True)
+            
+        # OpenAPI 3.0 Behavior
+        schema_30 = Profile.openapi_schema(version="3.0")
+        self.assertEqual(schema_30["properties"]["bio"]["type"], "string")
+        self.assertTrue(schema_30["properties"]["bio"]["nullable"])
+        self.assertEqual(schema_30["properties"]["status"]["enum"], ["online", "offline"])
+
+        # OpenAPI 3.1 Behavior
+        schema_31 = Profile.openapi_schema(version="3.1")
+        self.assertEqual(schema_31["properties"]["bio"]["type"], ["string", "null"])
+        self.assertNotIn("nullable", schema_31["properties"]["bio"])
+        # In 3.1, nullable enums MUST inject None to remain valid according to JSON Schema
+        self.assertEqual(schema_31["properties"]["status"]["enum"], ["online", "offline", None])
+
+    def test_invalid_openapi_version_raises(self):
+        class Dummy(FastModel):
+            x: int
+            
+        with self.assertRaises(ValueError):
+            Dummy.openapi_schema(version="2.0")
 
 
 if __name__ == "__main__":
