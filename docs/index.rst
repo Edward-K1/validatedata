@@ -46,33 +46,33 @@ Benchmarks (1 million repetitions)
      - beartype
      - fastjsonschema
    * - Scalar: type (int)
-     - 0.1109s
-     - 0.0842s
-     - 0.4254s
-     - 0.0793s
-     - 0.3594s
-     - 0.1478s
+     - 0.0968s
+     - 0.0779s
+     - 0.3878s
+     - 0.0947s
+     - 0.3384s
+     - 0.1444s
    * - Scalar: type + range
-     - 0.1508s
-     - 0.1286s
-     - 0.1314s
-     - 0.1353s
-     - 0.3841s
-     - 0.1493s
+     - 0.1160s
+     - 0.1267s
+     - 0.1249s
+     - 0.1276s
+     - 0.3628s
+     - 0.1447s
    * - Dict (valid)
-     - 1.9438s
-     - 1.1996s
-     - 1.8246s
-     - 1.2350s
-     - 3.8948s
-     - 2.8658s
+     - 0.8388s
+     - 0.8943s
+     - 2.5218s
+     - 1.2571s
+     - 
+     - 3.8539s
    * - Dict (invalid)
-     - 0.2644s
-     - 0.5856s
-     - 2.1661s
-     - 1.1895s
-     - 2.0818s
-     - 2.7938s
+     - 0.2005s
+     - 0.1830s
+     - 2.5063s
+     - 0.7378s
+     - 
+     - 3.1960s
 
 .. note::
    The “manual” column represents hand‑written `if` statements – fastest but not reusable or composable. Validatedata’s small overhead buys you maintainability and expressiveness.

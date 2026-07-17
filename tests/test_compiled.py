@@ -930,6 +930,232 @@ class TestTypeEdgeCases(unittest.TestCase):
 
 
 # ===========================================================================
+# Parameterized types — list[str], tuple[int, str], etc.
+# ===========================================================================
+
+class TestParameterizedTypes(unittest.TestCase):
+
+    def test_list_of_str_accepts_valid(self):
+        v = validator('list[str]')
+        self.assertTrue(v(['a', 'b']))
+
+    def test_list_of_str_rejects_invalid_item(self):
+        v = validator('list[str]')
+        self.assertFalse(v(['a', 1]))
+
+    def test_list_of_int_excludes_bool(self):
+        # list[int] should reject bools silently mixing in
+        v = validator('list[int]')
+        self.assertFalse(v([1, True, 3]))
+
+    def test_list_of_int_str_union(self):
+        v = validator('list[int,str]')
+        self.assertTrue(v([1, 'a', 2]))
+        self.assertFalse(v([1, 2.5]))
+
+    def test_list_of_email(self):
+        v = validator('list[email]')
+        self.assertTrue(v(['a@b.com', 'c@d.com']))
+        self.assertFalse(v(['a@b.com', 'bad']))
+
+    def test_tuple_of_str(self):
+        v = validator('tuple[str]')
+        self.assertTrue(v(('a', 'b')))
+        self.assertFalse(v(('a', 1)))
+
+    def test_set_of_float(self):
+        v = validator('set[float]')
+        self.assertTrue(v({1.0, 2.5}))
+        self.assertFalse(v({1.0, 'a'}))
+
+    def test_parameterized_unknown_inner_raises(self):
+        with self.assertRaises(TypeError):
+            validator('list[unknown]')
+
+    def test_parameterized_type_with_range(self):
+        v = validator('list[str]|min:1|max:3')
+        self.assertTrue(v(['a', 'b']))
+        self.assertFalse(v([]))
+        self.assertFalse(v(['a', 'b', 'c', 'd']))
+
+    def test_parameterized_type_with_contains(self):
+        v = validator('list[str]|contains:foo')
+        self.assertTrue(v(['foo', 'bar']))
+        self.assertFalse(v(['bar', 'baz']))
+
+
+# ===========================================================================
+# Fast validator paths & Ultra-fused fallbacks
+# ===========================================================================
+
+class TestFastValidatorPaths(unittest.TestCase):
+
+    def test_fast_validator_returns_callable(self):
+        from validatedata.compiled import fast_validator
+        v = fast_validator({'a': 'str'})
+        self.assertTrue(v({'a': 'hello'}))
+        self.assertFalse(v({'a': 123}))
+
+    def test_fast_validator_codegen_false(self):
+        from validatedata.compiled import fast_validator
+        v = fast_validator({'a': 'str'}, codegen=False)
+        self.assertTrue(v({'a': 'hello'}))
+        self.assertFalse(v({'a': 123}))
+
+    def test_fast_validator_fallback_on_timeout(self):
+        from validatedata.compiled import fast_validator
+        # Force timeout to be 0 to trigger fallback to regular codegen
+        v = fast_validator({'a': 'str'}, compile_timeout=0.0)
+        self.assertTrue(v({'a': 'hello'}))
+        self.assertFalse(v({'a': 123}))
+
+    def test_fast_validator_fallback_on_complex_schema(self):
+        from validatedata.compiled import fast_validator, _is_ultra_simple_schema
+        # 'format' is unsupported in ultra path
+        schema = {'c': 'color|format:hex'}
+        self.assertFalse(_is_ultra_simple_schema(schema))
+        v = fast_validator(schema)
+        self.assertTrue(v({'c': '#fff'}))
+        self.assertFalse(v({'c': 'red'}))
+
+
+# ===========================================================================
+# Ultra-fused compiler logic (walrus inlining, transforms, ranges)
+# ===========================================================================
+
+class TestUltraFusedPaths(unittest.TestCase):
+
+    def test_ultra_fused_simple_schema(self):
+        from validatedata.compiled import _is_ultra_simple_schema, _make_ultra_fused_validator
+        schema = {'name': 'str|min:2', 'age': 'int|min:18'}
+        self.assertTrue(_is_ultra_simple_schema(schema))
+        fn = _make_ultra_fused_validator(schema)
+        self.assertTrue(fn({'name': 'Alice', 'age': 20}))
+        self.assertFalse(fn({'name': 'A', 'age': 20}))
+        self.assertFalse(fn({'name': 'Alice', 'age': 17}))
+
+    def test_ultra_fused_nullable_walrus(self):
+        # Tests the walrus inlining for nullable fields
+        schema = {'name': 'str|nullable', 'age': 'int'}
+        fn = validator(schema)
+        self.assertTrue(fn({'age': 20}))
+        self.assertFalse(fn({'name': 123, 'age': 20}))
+
+    def test_ultra_fused_nested_dict_walrus(self):
+        # Tests the walrus inlining for nested dict isinstance check
+        schema = {'user': {'name': 'str', 'age': 'int'}}
+        fn = validator(schema)
+        self.assertTrue(fn({'user': {'name': 'Bob', 'age': 25}}))
+        self.assertFalse(fn({'user': {'name': 'Bob', 'age': 'abc'}}))
+        self.assertFalse(fn({'user': 'not_a_dict'}))
+
+    def test_ultra_fused_transforms(self):
+        schema = {'name': 'str|strip|lower|in:foo,bar'}
+        fn = validator(schema)
+        self.assertTrue(fn({'name': '  FOO  '}))
+        self.assertFalse(fn({'name': '  BAZ  '}))
+
+    def test_ultra_fused_in_not_in(self):
+        schema = {'status': 'str|in:active,inactive', 'role': 'str|not_in:admin'}
+        fn = validator(schema)
+        self.assertTrue(fn({'status': 'active', 'role': 'user'}))
+        self.assertFalse(fn({'status': 'active', 'role': 'admin'}))
+
+    def test_ultra_fused_contains(self):
+        schema = {'tags': 'list|contains:python'}
+        fn = validator(schema)
+        self.assertTrue(fn({'tags': ['python', 'go']}))
+        self.assertFalse(fn({'tags': ['go', 'rust']}))
+
+    def test_ultra_fused_date_range(self):
+        # Tests the _make_date_range_checker path in ultra-fused
+        schema = {'created_at': 'date|between:2020-01-01,2024-12-31'}
+        fn = validator(schema)
+        self.assertTrue(fn({'created_at': '2022-05-10'}))
+        self.assertFalse(fn({'created_at': '2019-01-01'}))
+
+    def test_ultra_fused_email_fix(self):
+        # Specific test for the missing _RE_email bug fix in _make_ultra_fused_validator
+        schema = {'email': 'email', 'name': 'str'}
+        fn = validator(schema)
+        self.assertTrue(fn({'email': 'test@example.com', 'name': 'Test'}))
+        self.assertFalse(fn({'email': 'bad-email', 'name': 'Test'}))
+
+    def test_ultra_var_usage_inlining(self):
+        # This test ensures the word-boundary variable counting logic works properly
+        # for variables used multiple times (e.g. _v0 used in isinstance and len)
+        schema = {'a': 'int|min:1|max:10', 'b': 'str|in:x,y'}
+        fn = validator(schema)
+        self.assertTrue(fn({'a': 5, 'b': 'x'}))
+        self.assertFalse(fn({'a': 15, 'b': 'x'}))
+        self.assertFalse(fn({'a': 5, 'b': 'z'}))
+
+
+# ===========================================================================
+# _make_callable unrolled paths
+# ===========================================================================
+
+class TestMakeCallablePaths(unittest.TestCase):
+
+    def test_single_check_no_nullable_no_transform(self):
+        from validatedata.compiled import _compile_pipe_rule, _make_callable
+        transform, checks, nullable = _compile_pipe_rule('str')
+        fn = _make_callable(transform, checks, nullable)
+        # Should return the check directly without wrapper
+        self.assertTrue(fn('hello'))
+        self.assertFalse(fn(123))
+
+    def test_two_checks(self):
+        from validatedata.compiled import _compile_pipe_rule, _make_callable
+        transform, checks, nullable = _compile_pipe_rule('str|min:2')
+        fn = _make_callable(transform, checks, nullable)
+        self.assertTrue(fn('hi'))
+        self.assertFalse(fn('h'))
+
+    def test_three_checks(self):
+        from validatedata.compiled import _compile_pipe_rule, _make_callable
+        transform, checks, nullable = _compile_pipe_rule('str|min:2|max:5|in:hi,hello')
+        fn = _make_callable(transform, checks, nullable)
+        self.assertTrue(fn('hi'))
+        self.assertFalse(fn('hey'))
+
+    def test_nullable_and_transform(self):
+        from validatedata.compiled import _compile_pipe_rule, _make_callable
+        transform, checks, nullable = _compile_pipe_rule('str|lower|nullable')
+        fn = _make_callable(transform, checks, nullable)
+        self.assertTrue(fn(None))
+        self.assertTrue(fn('HELLO'))
+
+
+# ===========================================================================
+# _make_date_range_checker
+# ===========================================================================
+
+class TestDateRangeChecker(unittest.TestCase):
+
+    def test_make_date_range_checker_both_bounds(self):
+        from validatedata.compiled import _make_date_range_checker
+        check = _make_date_range_checker('2020-01-01', '2021-01-01')
+        self.assertTrue(check('2020-06-15'))
+        self.assertFalse(check('2021-06-15'))
+        self.assertTrue(check(datetime(2020, 6, 15)))
+        self.assertFalse(check('not-a-date'))
+
+    def test_make_date_range_checker_min_only(self):
+        from validatedata.compiled import _make_date_range_checker
+        check = _make_date_range_checker('2020-01-01', None)
+        self.assertTrue(check('2021-01-01'))
+        self.assertFalse(check('2019-01-01'))
+
+    def test_make_date_range_checker_max_only(self):
+        from validatedata.compiled import _make_date_range_checker
+        check = _make_date_range_checker(None, '2021-01-01')
+        self.assertTrue(check('2020-01-01'))
+        self.assertFalse(check('2022-01-01'))
+
+
+
+# ===========================================================================
 # Performance — fast path is materially faster than engine
 # ===========================================================================
 
