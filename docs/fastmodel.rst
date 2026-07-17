@@ -277,7 +277,7 @@ Schema introspection
 **OpenAPI Schema Generation**
 -----------------------------------------------------
 
-For seamless integration with web frameworks (FastAPI, Flask-OpenAPI, Starlette, etc.), use `openapi_schema()` (or the classmethod alias `to_openapi_schema()`). It converts the model into a full **OpenAPI 3.1-compatible JSON Schema** (with proper `type`, `format`, `minimum`/`maximum`, `pattern`, `enum`, `nullable`, nested `$ref` support for other `FastModel` fields, and more).
+For seamless integration with web frameworks (FastAPI, Flask-OpenAPI, Starlette, etc.), use `openapi_schema()`. It converts the model into a full **OpenAPI 3.0-compatible JSON Schema**.
 
 This is the recommended way to power automatic API documentation, request/response validation, and client generation.
 
