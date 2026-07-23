@@ -41,7 +41,7 @@ from .engine import (
     _is_prime,
     _is_valid_color,
 )
-from .types import get_registered_checker
+from .customtypes import get_registered_checker
 
 
 # ---------------------------------------------------------------------------

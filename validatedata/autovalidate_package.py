@@ -10,7 +10,7 @@ from fnmatch import fnmatch
 from types import ModuleType
 from typing import Any, Callable, Dict, Iterable, List, Optional, Pattern, Tuple, Union
 
-from validatedata import types as types_registry  # validatedata/types.py
+from validatedata import customtypes as types_registry  # validatedata/customtypes.py
 from validatedata import validate_types
 
 PatternOrGlob = Union[str, Pattern]

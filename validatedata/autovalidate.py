@@ -128,7 +128,7 @@ def autovalidate(
             # Default: validate_types, merged with any registered checkers
             merged_checkers = dict(type_checkers or {})
             try:
-                from validatedata.types import export_registered_checkers
+                from validatedata.customtypes import export_registered_checkers
 
                 merged_checkers.update(export_registered_checkers())
             except Exception:

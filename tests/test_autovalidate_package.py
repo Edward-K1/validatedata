@@ -13,7 +13,7 @@ import re
 from decimal import Decimal
 
 from validatedata import ValidationError, autovalidate_package
-from validatedata import types as types_registry
+from validatedata import customtypes as types_registry
 
 
 def _write_file(path: str, content: str) -> None:

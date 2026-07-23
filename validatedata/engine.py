@@ -16,7 +16,7 @@ from types import SimpleNamespace
 from typing import Any, NamedTuple, List, Dict
 
 from .messages import error_messages as errm
-from .types import get_registered_checker
+from .customtypes import get_registered_checker
 
 
 
