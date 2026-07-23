@@ -3,7 +3,7 @@ import unittest
 from typing import Any, Callable
 
 # Import the registry API you added
-from validatedata.types import (
+from validatedata.customtypes import (
     register_type,
     unregister_type,
     get_registered_checker,

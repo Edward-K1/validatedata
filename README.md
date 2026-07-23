@@ -7,20 +7,18 @@ An easier way to validate data in python.
 **Seven validation modes – one simple syntax.**
 
 1. **`validator()`** – One word: speed. Ideal for high‑throughput streaming. msgspec, handwritten code, and this function will compete for first place.
-2. **`FastModel`** – declarative, typed models with compiled validation, rich error messages, and serialization.
-3. **`validate_data_fast()`** – compiled speed with **full error messages** (preview of the next‑gen engine – will eventually replace `validate_data`).
-4. **`validate_data()`** – general‑purpose validation with detailed errors, nested structures, and optional mutation.
+2. **`FastModel`** – declarative, typed models with compiled validation, rich error messages, serialization, and one-line bridging from Pydantic, msgspec, or dataclasses.
+3. **`V`** – fast validation using simple inline checks, e.g if V.int(5), V.email("not"). Returns bool by default but user can enable exceptions
+4. **`validate_data()`** / **`validate_data_fast()`** – general‑purpose validation with detailed errors, nested structures, and optional mutation.
 5. **`@validate`** – decorator for function argument validation.
 6. **`@validate_types`** – decorator that uses Python type annotations.
 7. **`autovalidate` / `autovalidate_package`** – automatically apply `@validate_types` to entire modules or packages.
 
 Validatedata gives you expressive, inline validation rules without defining model classes. It fits naturally into any Python workflow – from lightweight scripts to high‑volume data processing.
 
-**New in v0.6:** 
-- **`FastModel`** – declarative models with compiled validation, cross‑field checks, and serialization.
-- **`validate_data_fast`** – the speed of `validator()` combined with rich error messages (experimental fast path, will eventually replace `validate_data`).
-- **`autovalidate` & `autovalidate_package`** – automatic application of `@validate_types` to whole modules or packages.
-- **Custom type registration** – add your own type checkers with `register_type` / `unregister_type`.
+**New in v0.7:**
+- **`FastModel.bridge()`** – turn an existing Pydantic model, msgspec `Struct`, or dataclass into a `FastModel` subclass in one line, carrying over field constraints (`min_length`, `ge`/`le`, `pattern`, `Literal` choices, and more) so you get FastModel's compiled validation and serialization without rewriting the model.
+- **`V`** – single-line type checks (`V.int(x)`, `V.email(x)`) for when a full `Rule` or `FastModel` is more than you need.
 
 
 ### Benchmark (1 million repetitions)
@@ -57,13 +55,8 @@ if validate_user({'username': 'bob', 'email': 'bob@example.com', 'age': 25}):
 
 
 # Parameterized containers
-is_str_list = validator('list[str]')
-is_str_list(['a', 'b', 'c'])    # True
-is_str_list(['a', 1, 'c'])      # False
-
 is_str_or_int_list = validator('list[str,int]')
 is_str_or_int_list(['a', 1, 'c'])   # True
-
 
 # Nested dicts. Mirror structure
 v = validator({
@@ -114,13 +107,14 @@ data = user.to_dict()   # {'id': 1, 'username': 'alice', ...}
  
 # from_dict recursively converts nested dicts (e.g. "address") into their
 # FastModel type. Returns None if data is invalid; set validate=True to raise instead.
+# this is the prefered method for performance-conscious users
 user2 = User.from_dict(data)
 ```
-FastModel combines the speed of compiled rules with the convenience of dataclasses – ideal for API models and configuration objects. See the [FastModel reference](docs/fastmodel.rst) for a full walkthrough of every `Rule` option (transforms, custom messages, `default_factory`, nullable fields, and more).
+See the [FastModel reference](docs/fastmodel.rst) for a full walkthrough of every `Rule` option (transforms, custom messages, `default_factory`, nullable fields, and more).
  
 ### Hot loops / high‑throughput endpoints: `get_validator()` and `get_rules()`
  
-Constructing a `User(**kwargs)` instance runs full validation *and* builds an object every call which is more than you need when you're just checking millions of dicts in a tight loop or a request‑validation hot path. Get the compiled boolean validator once via get_validator and reuse it:
+Constructing a `User(**kwargs)` instance runs full validation *and* builds an object every call which is more than you need when you're just checking millions of dicts in a tight loop. Get the compiled boolean validator once via get_validator and reuse it:
  
 ```python
 # Compiled once, cached on the class — subsequent calls return the same function
@@ -143,6 +137,93 @@ User.get_rules()
 #  'email': 'email', 'tags': 'list[str]|max:20|nullable', 'address': {'street': 'str|min:3|max:64', 'city': 'str|re:^[A-Za-z ]+$'}}
 ```
 `openapi_schema()` returns the openapi 3.0 json schema. You can get version 3.1 by supplying the version parameter, i.e `User.openapi_schema(version="3.1")`
+
+### Bridging from Pydantic, msgspec, or dataclasses
+
+Already have models defined with another library? `FastModel.bridge()` builds an equivalent `FastModel` subclass from them, so you get compiled validation, serialization, and `openapi_schema()` without rewriting anything.
+
+```python
+from pydantic import BaseModel, Field
+from validatedata import FastModel
+
+class PyUser(BaseModel):
+    username: str = Field(min_length=3, max_length=32, pattern=r'^[a-z0-9_]+$')
+    age: int = Field(ge=18)
+
+FastUser = FastModel.bridge(PyUser)
+
+FastUser(username="alice", age=25)     # works
+FastUser(username="al", age=25)        # raises ValidationError (min_length)
+```
+
+The same call works on a msgspec `Struct` or a plain `@dataclass` — `bridge()` detects which one it was given. Field constraints carry over automatically:
+
+| Source | Mapped to FastModel |
+|--------|---------------------|
+| `min_length` / `max_length` (Pydantic, msgspec) | `min` / `max` |
+| `ge` / `le` (Pydantic, msgspec) | `min` / `max` |
+| `pattern` (Pydantic, msgspec) | `pattern` |
+| `Literal[...]` (any source) | `choices` |
+| default / `default_factory` | `default` / `default_factory` |
+| nested model fields | recursively bridged, once per type |
+
+Constraints with no equivalent in validatedata's engine — `gt`/`lt` (strict bounds), `multiple_of`, and msgspec's `tz` — raise a clear `ValueError` at bridge time rather than being silently dropped or loosened. For example, if `age` above had used `Field(gt=18)` instead of `Field(ge=18)`, bridging would raise unless you hand it a rule yourself:
+
+```python
+FastUser = FastModel.bridge(
+    PyUser,
+    extra_rules={"age": "int|min:19"},   # your own translation of gt=18
+)
+```
+
+Other options, using the original `PyUser` (with `ge=18`) from above:
+
+```python
+FastModel.bridge(
+    PyUser,
+    field_overrides={"username": Rule(min=5, max=10)},  # replace a field's rule entirely
+    model_check=my_cross_field_check,                    # attach cross-field validation
+)
+
+# Bridge an instance directly instead of the class — returns a populated FastModel instance
+existing_user = PyUser(username="alice", age=25)
+bridged_user = FastModel.bridge(existing_user)
+```
+
+## Single‑line checks with `V`
+
+Sometimes you don't want a `Rule`, a `FastModel`, or a rule dict — you just want to ask one question about one value, inline:
+
+```python
+from validatedata import V
+
+if V.int(5):
+    ...
+if not V.email(user_input):
+    raise ValueError("bad email")
+```
+
+`V` covers the same base types as `validator()` — `int`, `str`, `float`, `bool`, `list`, `dict`, `tuple`, `set`, plus format checks like `email`, `url`, `uuid`, `date`, `ip`, `phone`, `slug`, `semver`, `color`, `even`, `odd`, `prime`, `decimal`, `path`. Each check is a plain function on the class — no instantiation, no rule string, nothing to compile.
+
+By default a failed check just returns `False`. Call `V.raise_on_fail(True)` to switch every check to a raising variant that throws `TypeError` naming the expected and actual types, instead of returning `False`:
+
+```python
+V.raise_on_fail(True)
+V.int("not an int")
+# TypeError: expected int, got str
+
+V.raise_on_fail(False)   # back to bool-returning
+V.int("not an int")      # False
+```
+
+For a type that isn't one of `V`'s predeclared attributes — a type you registered with `register_type`, or a plain Python/stdlib type — use `V.check(name, value)`:
+
+```python
+V.check("datetime", some_dt)
+V.check("MyRegisteredType", obj)
+```
+
+`V` deliberately doesn't do rules, pipe strings, or `Rule` composition — constraint logic (`min`, `max`, `pattern`, `nullable`, ...) is `Rule`/`FastModel`'s job. `V` only ever answers "is this value this type," optionally loudly.
 
 ## Installation
 
@@ -186,9 +267,11 @@ else:
 
 ---
 
-## Six Ways to Validate
+## Function & Data Validation, In Detail
 
-## 1. `validator()` – for high performance (boolean only)
+`FastModel`, `V`, and `FastModel.bridge()` each have their own section above. The six patterns below cover the rest: direct calls and decorators for validating raw data and function arguments.
+
+### 1. `validator()` – for high performance (boolean only)
  ```python
  from validatedata import validator
  
@@ -197,7 +280,7 @@ else:
      do_xyz()
  
  ```
- ### 2. compiled speed + error messages (experimental)
+### 2. `validate_data_fast()` – compiled speed + error messages (experimental)
 
  ```python
  from validatedata import validate_data_fast
@@ -518,20 +601,6 @@ rules = [{
 ## Shorthand Rule Strings
 
 Rules can be expressed as compact strings instead of dicts. There are two syntaxes: the original **colon syntax** (deprecated) for simple cases, and the newer **pipe syntax** for anything more expressive.
-
----
-
-### Colon syntax (deprecated)
-
-```python
-'str'                                    # string
-'str:20'                                 # string of exactly 20 characters
-'int:10'                                 # int of exactly 10 digits
-'email'                                  # email address
-'email:msg:invalid email address'        # with custom error message
-'int:1:to:100'                           # int in range 1 to 100
-'regex:[A-Z]{3}'                         # must match regex
-```
 
 ---
 

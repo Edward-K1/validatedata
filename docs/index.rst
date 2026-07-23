@@ -14,14 +14,15 @@ An easier way to validate data in python.
 **Seven validation modes – one simple syntax.**
 
  1. **`validator()`** – One word: speed. Ideal for high‑throughput streaming. msgspec, handwritten code, and this function will compete for first place.
- 2. **`validate_data_fast()`** – same compiled speed but with **full error messages** (preview of the next‑gen engine).
- 3. **`validate_data()`** – general‑purpose validation with detailed errors, nested structures, and optional mutation.
+ 2. **`FastModel`** – declarative, typed models with compiled validation, rich error messages, and serialization.
+ 3. **`V`** – fast validation using simple inline checks, e.g if V.int(5), V.email("not"). Returns bool by default but user can enable exceptions
+ 4. **`validate_data()`** / **`validate_data_fast()`** – general‑purpose validation with detailed errors, nested structures, and optional mutation.
  4. **`@validate`** – decorator for function argument validation.
  5. **`@validate_types`** – decorator that uses Python type annotations.
  6. **`FastModel`** – declarative, typed models with compiled validation, rich error messages, and serialization.
  7. **`autovalidate` / `autovalidate_package`** – automatically apply `@validate_types` to entire modules or packages.
 
-Validatedata gives you expressive, inline validation rules without defining model classes. It fits naturally into any Python workflow – from lightweight scripts to high‑volume data processing.
+Validatedata gives you expressive rules and fits naturally into any Python workflow. It can be used in lightweight scripts, Web APIs, and high‑volume data processing.
 
 **New in v0.6:**
 - **`FastModel`** – declarative models with compiled validation, cross‑field checks, and zero‑overhead serialization.

@@ -23,7 +23,8 @@ Serialisation / deserialisation
 from __future__ import annotations
 
 import sys
-from typing import Any, Callable,ClassVar, Dict, List, Optional, Tuple, Type, get_args, get_origin, get_type_hints, Mapping
+import types
+from typing import Any, Callable,ClassVar, Dict, List, Optional, Tuple, Type, Union, get_args, get_origin, get_type_hints, Mapping
 
 from .rule import Rule, _MISSING
 from . import fast as _fast
@@ -298,7 +299,7 @@ def _build_fused_validate_construct(cls) -> Callable:
             lines.append(f"    except KeyError: return None")
             lines.append(f"    if not _fv{idx}(_v{idx}): return None")
             if has_transform:
-                lines.append(f"    _v{idx} = _tf{idx}(_v{idx})")
+                lines.append(f"        _v{idx} = _tf{idx}(_v{idx})")
             lines.append(f"    _d[_f{idx}] = _v{idx}")
     
     lines.append("    return inst")
@@ -516,8 +517,18 @@ class _FastModelMeta(type):
                             hint = sub
                             break
                             
-                if isinstance(hint, type) and issubclass(hint, FastModel) and hint is not FastModel:
-                    cls.__nested_model_fields__[fname] = hint
+                resolved_hint = hint
+                origin = get_origin(hint)
+                is_union = origin is Union or (hasattr(types, "UnionType") and origin is types.UnionType)
+                if is_union:
+                    args = get_args(hint)
+                    for arg in args:
+                        if isinstance(arg, type) and issubclass(arg, FastModel) and arg is not FastModel:
+                            resolved_hint = arg
+                            break
+
+                if isinstance(resolved_hint, type) and issubclass(resolved_hint, FastModel) and resolved_hint is not FastModel:
+                    cls.__nested_model_fields__[fname] = resolved_hint
 
         # --- Build __field_meta__ for fast construction ---
         cls.__field_meta__ = tuple(
@@ -1397,3 +1408,27 @@ class FastModel(metaclass=_FastModelMeta):
         v = validator(cls.__rule_dict__)
         cls.__fast_validator__ = v
         return v
+        
+    @classmethod
+    def bridge(
+        cls,
+        source_model: Any,
+        *,
+        field_overrides: Optional[Dict[str, Any]] = None,
+        model_check: Optional[Callable] = None,
+        extra_rules: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        """
+        Dynamically generate a FastModel subclass from an existing Pydantic,
+        msgspec, or dataclass model. If an instance is passed, returns a populated
+        FastModel instance instead.
+        """
+        from .bridge import build_bridged_model 
+        
+        return build_bridged_model(
+            fastmodel_base=cls,
+            source_model=source_model,
+            field_overrides=field_overrides,
+            model_check=model_check,
+            extra_rules=extra_rules,
+        )
