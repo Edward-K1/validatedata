@@ -48,7 +48,7 @@ import.
 Seven ways to validate
 --------------------
 
-Validatedata offers six entry points, from ultra‑fast boolean checks to automatic
+Validatedata offers seven entry points, from ultra‑fast boolean checks to automatic
 package‑wide validation.
 
 1. **`validator()`** – fastest, boolean only
@@ -118,7 +118,29 @@ package‑wide validation.
 
      user = User(name="Alice", email="alice@example.com")
 
-7. **Auto‑validation of modules / packages**
+Already have a Pydantic model, msgspec ``Struct``, or dataclass? Bridge it
+instead of rewriting it — see :doc:`fastmodel` for details.
+
+.. code-block:: python
+
+   FastUser = FastModel.bridge(ExistingPydanticModel)
+
+7. **`V`** – single-line type checks
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   from validatedata import V
+
+   if V.int(5):
+       print('ok')
+   if not V.email('not-an-email'):
+       print('invalid')
+
+See :doc:`v` for the full reference, including ``V.raise_on_fail()`` and
+``V.check()``.
+
+8. **Auto‑validation of modules / packages**
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
