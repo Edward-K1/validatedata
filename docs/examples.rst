@@ -42,6 +42,26 @@ The performance advantage of the *validator* function on invalid data comes from
     is_str_or_int_list(['a', 1, 'c'])   # True
 
 
+One-off checks with ``V``
+--------------------------
+
+When you just need a yes/no answer about a single value — no rule, no
+compiled validator — use ``V``.
+
+.. code-block:: python
+
+   from validatedata import V
+
+   if not V.email(request.form.get('email', '')):
+       return 'invalid email', 400
+
+   V.raise_on_fail(True)
+   V.int(user_input)   # raises TypeError if not an int
+
+See :doc:`v` for the full reference.
+
+----
+
 User registration
 -----------------
 
@@ -541,3 +561,29 @@ When you have a recurring data shape, define a model once and reuse it.
 
     # Reconstruct from dict (fast path)
     product2 = Product.from_dict(data, validate="check")
+
+----
+
+Bridging an existing Pydantic model
+-------------------------------------
+
+Already have models defined with Pydantic, msgspec, or dataclasses? Bridge
+them into ``FastModel`` instead of rewriting them from scratch.
+
+.. code-block:: python
+
+    from pydantic import BaseModel, Field
+    from validatedata import FastModel
+
+    class PyProduct(BaseModel):
+        name: str = Field(min_length=3, max_length=100)
+        price: float = Field(ge=0)
+
+    FastProduct = FastModel.bridge(PyProduct)
+
+    product = FastProduct(name="Widget", price=19.99)   # compiled validation
+    data = product.to_dict()                             # same serialization as any FastModel
+
+See :doc:`fastmodel` for the full reference, including ``extra_rules`` and
+``field_overrides`` for constraints (like ``gt``/``lt`` or ``multiple_of``)
+that have no direct equivalent in validatedata's engine.

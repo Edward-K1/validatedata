@@ -322,3 +322,47 @@ whole model — the same function used internally by `is_valid_data` and the
 
    validate = User.get_validator()
    validate({"username": "alice", "email": "alice@example.com"})   # True / False
+
+----
+
+Bridging from Pydantic, msgspec, or dataclasses
+-------------------------------------------------
+
+.. versionadded:: 0.7.0
+
+Already have models defined with another library? ``FastModel.bridge()`` builds
+an equivalent `FastModel` subclass from a Pydantic model, msgspec ``Struct``, or
+dataclass — carrying over field constraints (``min_length``/``max_length``,
+``ge``/``le``, ``pattern``, ``Literal`` choices, defaults) so you get compiled
+validation and serialization without rewriting the model.
+
+.. code-block:: python
+
+   from pydantic import BaseModel, Field
+   from validatedata import FastModel
+
+   class PyUser(BaseModel):
+       username: str = Field(min_length=3, max_length=32, pattern=r'^[a-z0-9_]+$')
+       age: int = Field(ge=18)
+
+   FastUser = FastModel.bridge(PyUser)
+
+   FastUser(username="alice", age=25)     # works
+   FastUser(username="al", age=25)        # raises ValidationError
+
+Constraints with no equivalent in validatedata's engine — ``gt``/``lt`` (strict
+bounds), ``multiple_of``, and msgspec's ``tz`` — raise ``ValueError`` at bridge
+time rather than being silently dropped or loosened. Supply your own rule for
+that field via ``extra_rules`` to bridge it anyway:
+
+.. code-block:: python
+
+   FastModel.bridge(
+       PyUser,
+       extra_rules={"age": "int|min:18"},                   # handle it yourself
+       field_overrides={"username": Rule(min=5, max=10)},   # or replace a rule entirely
+       model_check=my_cross_field_check,
+   )
+
+   # Bridge an instance directly — returns a populated FastModel instance
+   bridged_user = FastModel.bridge(PyUser(username="alice", age=25))

@@ -14,21 +14,18 @@ An easier way to validate data in python.
 **Seven validation modes – one simple syntax.**
 
  1. **`validator()`** – One word: speed. Ideal for high‑throughput streaming. msgspec, handwritten code, and this function will compete for first place.
- 2. **`FastModel`** – declarative, typed models with compiled validation, rich error messages, and serialization.
+ 2. **`FastModel`** – declarative, typed models with compiled validation, rich error messages, serialization, and one-line bridging from Pydantic, msgspec, or dataclasses.
  3. **`V`** – fast validation using simple inline checks, e.g if V.int(5), V.email("not"). Returns bool by default but user can enable exceptions
  4. **`validate_data()`** / **`validate_data_fast()`** – general‑purpose validation with detailed errors, nested structures, and optional mutation.
- 4. **`@validate`** – decorator for function argument validation.
- 5. **`@validate_types`** – decorator that uses Python type annotations.
- 6. **`FastModel`** – declarative, typed models with compiled validation, rich error messages, and serialization.
+ 5. **`@validate`** – decorator for function argument validation.
+ 6. **`@validate_types`** – decorator that uses Python type annotations.
  7. **`autovalidate` / `autovalidate_package`** – automatically apply `@validate_types` to entire modules or packages.
 
-Validatedata gives you expressive rules and fits naturally into any Python workflow. It can be used in lightweight scripts, Web APIs, and high‑volume data processing.
+Validatedata gives you expressive rules and fits naturally into any Python workflow. It can be used by everything from lightweight scripts to high‑volume data processing.
 
-**New in v0.6:**
-- **`FastModel`** – declarative models with compiled validation, cross‑field checks, and zero‑overhead serialization.
-- **`validate_data_fast`** – the speed of `validator()` combined with rich error messages. This is an **experimental** fast path that will eventually replace `validate_data` once the API stabilises.
-- **`autovalidate` & `autovalidate_package`** – automatically apply `@validate_types` to whole modules or packages.
-- **Custom type registration** – add your own type checkers with `register_type` / `unregister_type`.
+**New in v0.7:**
+- **`FastModel.bridge()`** – turn an existing Pydantic model, msgspec ``Struct``, or dataclass into a `FastModel` subclass in one line, carrying over field constraints (`min_length`, `ge`/`le`, `pattern`, `Literal` choices, and more).
+- **`V`** – single-line type checks (`V.int(x)`, `V.email(x)`) for when a full `Rule` or `FastModel` is more than you need.
 - **`check_rule`** – validate rule dicts before using them.
 - **`VALID_RULE_KEYS`** – introspection of all recognised rule keys.
 
@@ -106,6 +103,7 @@ Benchmarks (1 million repetitions)
    autovalidate
    fast-validator
    fastmodel
+   v
    examples
 
 .. toctree::
