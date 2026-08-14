@@ -35,7 +35,11 @@ from . import diagnose as _diagnose
 if sys.version_info >= (3, 9):
     from typing import Annotated
 else:
-    from typing_extensions import Annotated
+    try:
+        from typing_extensions import Annotated
+    except ImportError:
+        # Fallback for users on Python < 3.9 who opt out of the extension
+        Annotated = type("Annotated", (), {})
 
 # ---------------------------------------------------------------------------
 # Codegen flag
