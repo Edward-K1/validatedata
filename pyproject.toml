@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "validatedata"
-version = "0.7.1"
+version = "0.7.2"
 authors = [
   { name="Edward Kigozi", email="eddyk1collab@gmail.com" },
 ]
@@ -13,9 +13,7 @@ readme = "README.md"
 # Updated to the new SPDX string format to silence warnings
 license = "MIT"
 requires-python = ">=3.8"
-dependencies = [
-    "python-dateutil",
-]
+
 keywords = ["validate", "data", "validation"]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -28,6 +26,8 @@ Repository = "https://github.com/Edward-K1/validatedata.git"
 Issues = "https://github.com/Edward-K1/validatedata/issues"
 Documentation = "https://validatedata.readthedocs.io"
 
+[project.optional-dependencies]
+dates = ["python-dateutil"]
 
 [tool.setuptools]
 packages = ["validatedata"]

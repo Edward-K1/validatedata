@@ -19,6 +19,10 @@ Validatedata gives you expressive, inline validation rules without defining mode
 **New in v0.7:**
 - **`FastModel.bridge()`** – turn an existing Pydantic model, msgspec `Struct`, or dataclass into a `FastModel` subclass in one line, carrying over field constraints (`min_length`, `ge`/`le`, `pattern`, `Literal` choices, and more) so you get FastModel's compiled validation and serialization without rewriting the model.
 - **`V`** – single-line type checks (`V.int(x)`, `V.email(x)`) for when a full `Rule` or `FastModel` is more than you need.
+- **Zero hard dependencies** – `python-dateutil` is no longer required. Core install is dependency-free; date validation uses strict ISO-8601 by default (`datetime.fromisoformat`). For the previous flexible parsing (e.g. `"23-Oct-2000"`), install the optional extra:
+  ```bash
+  pip install validatedata[dates]
+  ```
 
 
 ### Benchmark (1 million repetitions)

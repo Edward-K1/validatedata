@@ -11,12 +11,13 @@ from collections import OrderedDict
 from contextvars import ContextVar
 from dataclasses import dataclass, field as dc_field
 from datetime import datetime
-from dateutil.parser import parse as parse_date
 from types import SimpleNamespace
 from typing import Any, NamedTuple, List, Dict
 
 from .messages import error_messages as errm
 from .customtypes import get_registered_checker
+from .dates import parse_date
+
 
 
 
@@ -1061,6 +1062,12 @@ def _run_validate_object(
         ctx.group_errors = False
         rule_dict = rules[0]
         transformed = _apply_transform(data, rule_dict)
+        if not _validate_type(transformed, rule_dict, '', parent_path, ctx):
+            ctx.transformed_data.append(transformed if ctx.mutate else data)
+            return
+        if transformed is None and rule_dict.get('nullable'):
+            ctx.transformed_data.append(data)
+            return
         _run_scalar_validators(transformed, rule_dict, '', parent_path, ctx)
         ctx.transformed_data.append(transformed if ctx.mutate else data)
 

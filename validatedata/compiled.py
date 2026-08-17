@@ -10,7 +10,7 @@ from ast import literal_eval
 from collections import OrderedDict
 from typing import Any, Callable
 
-from dateutil.parser import parse as parse_date
+from .dates import parse_date
 
 from .validatedata import (
     _pipe_tokenize,
