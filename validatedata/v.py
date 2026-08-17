@@ -46,7 +46,7 @@ import pathlib as _pathlib_mod
 from datetime import date as _date_cls, datetime as _datetime_cls
 from typing import Any, Callable, Optional
 
-from dateutil.parser import parse as _parse_date
+from .dates import parse_date as _parse_date
 
 from .compiled import _TYPE_CHECK
 from .customtypes import get_registered_checker
