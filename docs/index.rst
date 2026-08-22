@@ -9,7 +9,7 @@ validatedata
    :target: https://badge.fury.io/py/validatedata
    :alt: PyPI version
 
-An easier way to validate data in python.
+Lightning-fast validation in python.
 
 **Seven validation modes – one simple syntax.**
 
