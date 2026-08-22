@@ -8,7 +8,7 @@ version = "0.7.2"
 authors = [
   { name="Edward Kigozi", email="eddyk1collab@gmail.com" },
 ]
-description = "An easier way to validate data in python"
+description = "Lightning-fast validation in python."
 readme = "README.md"
 # Updated to the new SPDX string format to silence warnings
 license = "MIT"
