@@ -2,7 +2,7 @@
 ![build workflow](https://github.com/Edward-K1/validatedata/actions/workflows/test.yml/badge.svg)
 [![PyPI version](https://badge.fury.io/py/validatedata.svg)](https://badge.fury.io/py/validatedata)
 
-An easier way to validate data in python.
+Lightning-fast validation in python.
 
 **Seven validation modes – one simple syntax.**
 
