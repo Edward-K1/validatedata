@@ -1247,12 +1247,12 @@ if not result.ok:
 Contributions are welcome!
 
 **Before starting work on a new feature or non-trivial change, please open an issue first.**
-This helps avoid duplicate effort and lets us align on scope and approach before any code is written.
+
 
 ### Getting Started
 
 1. Open an issue describing what you'd like to add or change
-2. You'll be informed if there's someone working on it and given the green light if it's the right call
+2. You'll be informed if there's someone working on it to avoid duplicate work and to ensure its the right call.
 2. Fork the repository and create a branch off `main`
 ```
    git checkout -b feature/your-feature-name
