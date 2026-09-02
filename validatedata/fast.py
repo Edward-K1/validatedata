@@ -124,7 +124,7 @@ def _compile_pipe_rule_to_struct(rule_str: str) -> _CompiledRule:
             custom_msg = value.strip() if value else None
         elif key == "strict":
             strict_seen = True
-        elif key in _VALIDATOR_TO_MESSAGE or key in ("min", "max", "between"):
+        elif key in _VALIDATOR_TO_MESSAGE or key in ("min", "max", "between", "gt", "lt", "multiple_of"):
             validator_names.append(key)
             validator_args.append(value.strip() if value else None)
 
@@ -217,6 +217,18 @@ def _message_for_check_at_index(
                 template = _msg.get(msg_key, "value out of range")
                 if arg:
                     template = template.replace("{min}", arg).replace("{max}", arg)
+        return template
+
+    # For gt, lt, multiple_of — always numeric, single-bound messages.
+    if validator_name in ("gt", "lt", "multiple_of"):
+        msg_key = {
+            "gt": "number_not_greater_than",
+            "lt": "number_not_less_than",
+            "multiple_of": "number_not_multiple_of",
+        }[validator_name]
+        template = _msg.get(msg_key, "value failed constraint")
+        if arg:
+            template = template.replace("{min}", arg).replace("{max}", arg)
         return template
 
     # All other validators (length, in, contains, re, etc.)

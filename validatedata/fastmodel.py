@@ -1313,6 +1313,47 @@ class FastModel(metaclass=_FastModelMeta):
                 except (ValueError, TypeError):
                     pass
 
+        # Resolve Exclusive Bounds (gt / lt) and Step (multiple_of)
+        gt_val = rule_obj.kwargs.get("gt")
+        if gt_val is None and "gt" in compiled_constraints:
+            gt_val = compiled_constraints["gt"]
+
+        lt_val = rule_obj.kwargs.get("lt")
+        if lt_val is None and "lt" in compiled_constraints:
+            lt_val = compiled_constraints["lt"]
+
+        multiple_of_val = rule_obj.kwargs.get("multiple_of")
+        if multiple_of_val is None and "multiple_of" in compiled_constraints:
+            multiple_of_val = compiled_constraints["multiple_of"]
+
+        if openapi_type in ("integer", "number"):
+            coercer = int if openapi_type == "integer" else float
+            if gt_val is not None:
+                try:
+                    gt_num = coercer(gt_val)
+                    if version == "3.1":
+                        field_schema["exclusiveMinimum"] = gt_num
+                    else:
+                        field_schema["minimum"] = gt_num
+                        field_schema["exclusiveMinimum"] = True
+                except (ValueError, TypeError):
+                    pass
+            if lt_val is not None:
+                try:
+                    lt_num = coercer(lt_val)
+                    if version == "3.1":
+                        field_schema["exclusiveMaximum"] = lt_num
+                    else:
+                        field_schema["maximum"] = lt_num
+                        field_schema["exclusiveMaximum"] = True
+                except (ValueError, TypeError):
+                    pass
+            if multiple_of_val is not None:
+                try:
+                    field_schema["multipleOf"] = coercer(multiple_of_val)
+                except (ValueError, TypeError):
+                    pass
+
         # Resolve Length Constraints
         length_val = rule_obj.kwargs.get("length")
         if length_val is None and "length" in compiled_constraints:
