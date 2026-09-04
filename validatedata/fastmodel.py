@@ -567,8 +567,7 @@ class _FastModelMeta(type):
                                 parts.append(f"{k}:{v}")
                         rule_str = "|".join(parts)
                     
-                    # Fields with defaults are effectively optional for dict validation
-                    if rule_obj.has_default and "nullable" not in rule_str.split("|"):
+                    if rule_obj.nullable and "nullable" not in rule_str.split("|"):
                         rule_str = rule_str + "|nullable"
                     
                     rule_dict[fname] = rule_str

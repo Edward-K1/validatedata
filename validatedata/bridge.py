@@ -191,11 +191,28 @@ def _process_field(
     elif name in extra:
         e_rule = extra[name]
         if isinstance(e_rule, Rule):
+            # Explicit Rule instance wins completely; nothing extracted from
+            # the source model (kwargs) should leak into it.
             namespace[name] = e_rule
         elif isinstance(e_rule, dict):
-            namespace[name] = Rule(**kwargs, **e_rule)
+            # Dict form: caller-supplied keys take precedence over whatever
+            # was extracted from the source model, but extracted keys still
+            # fill in anything the caller didn't specify.
+            namespace[name] = Rule(**{**kwargs, **e_rule})
         else:
-            namespace[name] = Rule(rule=e_rule, **kwargs)
+            # Pipe-string form (e.g. "int|min:18|max:120"): the string is a
+            # complete, self-contained constraint set from the caller and
+            # must not be combined with the constraint kwargs already
+            # extracted from the source model (min/max/pattern/choices/...),
+            # or those get re-appended and duplicated (e.g.
+            # "int|min:18|max:120|min:18"). Only bookkeeping that isn't a
+            # constraint - the default/default_factory - is preserved.
+            keep: Dict[str, Any] = {}
+            if "default" in kwargs:
+                keep["default"] = kwargs["default"]
+            if "default_factory" in kwargs:
+                keep["default_factory"] = kwargs["default_factory"]
+            namespace[name] = Rule(rule=e_rule, **keep)
     else:
         namespace[name] = Rule(**kwargs) if kwargs else _MISSING
 
