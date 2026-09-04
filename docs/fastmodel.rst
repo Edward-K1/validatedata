@@ -329,12 +329,18 @@ Bridging from Pydantic, msgspec, or dataclasses
 -------------------------------------------------
 
 .. versionadded:: 0.7.0
+.. versionchanged:: 0.7.3
+   Native support for ``gt``/``lt``/``multiple_of`` (and the corresponding
+   ``annotated_types`` markers). Correct handling of ``Optional`` scalar
+   fields and of fields that only have a default. Pipe-string ``extra_rules``
+   no longer duplicate constraints extracted from the source model.
 
-Already have models defined with another library? ``FastModel.bridge()`` builds
-an equivalent `FastModel` subclass from a Pydantic model, msgspec ``Struct``, or
-dataclass — carrying over field constraints (``min_length``/``max_length``,
-``ge``/``le``, ``pattern``, ``Literal`` choices, defaults) so you get compiled
-validation and serialization without rewriting the model.
+Already have models defined with another library?
+``FastModel.bridge()`` builds an equivalent ``FastModel`` subclass from a
+Pydantic model, msgspec ``Struct``, or dataclass — carrying over field
+constraints (``min_length``/``max_length``, ``ge``/``le``/``gt``/``lt``,
+``multiple_of``, ``pattern``, ``Literal`` choices, defaults, nullability)
+so you get compiled validation and serialisation without rewriting the model.
 
 .. code-block:: python
 
@@ -350,17 +356,23 @@ validation and serialization without rewriting the model.
    FastUser(username="alice", age=25)     # works
    FastUser(username="al", age=25)        # raises ValidationError
 
-Constraints with no equivalent in validatedata's engine — ``gt``/``lt`` (strict
-bounds), ``multiple_of``, and msgspec's ``tz`` — raise ``ValueError`` at bridge
-time rather than being silently dropped or loosened. Supply your own rule for
-that field via ``extra_rules`` to bridge it anyway:
+The same call works on a msgspec ``Struct`` or a plain ``@dataclass``.
+Nested models are bridged recursively and memoised (the same source type
+always produces the same bridged class). Self-referential / circular model
+graphs raise a clear ``TypeError``.
+
+Unsupported constraints (currently only msgspec's ``tz``) raise
+``ValueError`` at bridge time rather than being silently dropped. Supply
+your own rule for that field via ``extra_rules`` if needed.
+
+Additional options:
 
 .. code-block:: python
 
    FastModel.bridge(
        PyUser,
-       extra_rules={"age": "int|min:18"},                   # handle it yourself
-       field_overrides={"username": Rule(min=5, max=10)},   # or replace a rule entirely
+       extra_rules={"age": "int|min:18|max:120"},          # pipe string (replaces extracted constraints)
+       field_overrides={"username": Rule(min=5, max=10)},  # full Rule replacement
        model_check=my_cross_field_check,
    )
 

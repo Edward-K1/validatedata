@@ -15,7 +15,7 @@ Lightning-fast validation in python.
 
  1. **`validator()`** – One word: speed. Ideal for high‑throughput streaming. msgspec, handwritten code, and this function will compete for first place.
  2. **`FastModel`** – declarative, typed models with compiled validation, rich error messages, serialization, and one-line bridging from Pydantic, msgspec, or dataclasses.
- 3. **`V`** – fast validation using simple inline checks, e.g if V.int(5), V.email("not"). Returns bool by default but user can enable exceptions
+ 3. **`V`** – fast single-line checks for both types and constraints(e.g. ``V.int(5)``, ``V.between(1, 10, 5)``). Returns ``bool`` by default. Call ``V.raise_on_fail(True)`` to raise instead. 
  4. **`validate_data()`** / **`validate_data_fast()`** – general‑purpose validation with detailed errors, nested structures, and optional mutation.
  5. **`@validate`** – decorator for function argument validation.
  6. **`@validate_types`** – decorator that uses Python type annotations.
