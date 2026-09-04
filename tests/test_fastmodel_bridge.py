@@ -243,5 +243,140 @@ class TestBridgeMsgspec(unittest.TestCase):
         self.assertEqual(fast_inst.price, 29.99)
 
 
+class TestBridgeNullableRegressions(unittest.TestCase):
+    """
+    Regression tests for two bridging bugs:
+
+    1. A field that merely has a default (but isn't Optional/Union[..., None])
+       was incorrectly reported/validated as nullable, e.g. a Literal field
+       with a default such as `role: Literal["admin", "member"] = "member"`.
+    2. Passing a pipe-string via extra_rules (e.g. "int|min:18|max:120") for a
+       field that also had constraints extracted from the source model (e.g.
+       Pydantic's Field(ge=18)) duplicated those constraints in the final
+       rule string (e.g. "int|min:18|max:120|min:18").
+    """
+
+    def test_default_only_field_is_not_nullable(self):
+        @dataclasses.dataclass
+        class DCUser:
+            username: str
+            age: int = 18
+            address: Optional[DCAddress] = None
+
+        FastDC = FastModel.bridge(DCUser)
+        rules = FastDC.get_rules()
+
+        self.assertEqual(rules["age"], "int")
+        self.assertNotIn("nullable", rules["age"].split("|"))
+
+        # The nested model's own defaulted, non-optional field must not pick
+        # up nullable either.
+        self.assertEqual(rules["address"]["zipcode"], "str")
+
+        # A genuinely-optional nested model field should remain nullable at
+        # construction time even though get_rules() no longer tags scalar
+        # fields as nullable just for having a default.
+        user = FastDC(username="alice")
+        self.assertIsNone(user.address)
+
+    @unittest.skipUnless(HAS_PYDANTIC, "Pydantic not installed")
+    def test_literal_field_with_default_is_not_nullable(self):
+        from typing import Literal
+
+        class PyUser(BaseModel):
+            username: str = Field(min_length=3, max_length=32)
+            age: int = Field(ge=18)
+            role: Literal["admin", "member", "guest"] = "member"
+
+        FastUser = FastModel.bridge(PyUser)
+        rules = FastUser.get_rules()
+
+        self.assertEqual(rules["role"], "str|in:admin,member,guest")
+        self.assertNotIn("nullable", rules["role"].split("|"))
+
+    @unittest.skipUnless(HAS_PYDANTIC, "Pydantic not installed")
+    def test_extra_rules_pipe_string_does_not_duplicate_constraints(self):
+        class PyUser(BaseModel):
+            username: str = Field(min_length=3, max_length=32)
+            age: int = Field(ge=18)
+
+        FastUser = FastModel.bridge(
+            PyUser,
+            extra_rules={"age": "int|min:18|max:120"},
+        )
+        rules = FastUser.get_rules()
+
+        self.assertEqual(rules["age"], "int|min:18|max:120")
+        # 'min:18' must appear exactly once, not duplicated.
+        self.assertEqual(rules["age"].split("|").count("min:18"), 1)
+
+    @unittest.skipUnless(HAS_PYDANTIC, "Pydantic not installed")
+    def test_extra_rules_pipe_string_preserves_default(self):
+        class PyUser(BaseModel):
+            age: int = Field(default=21, ge=18)
+
+        FastUser = FastModel.bridge(
+            PyUser,
+            extra_rules={"age": "int|min:18|max:120"},
+        )
+        # No key supplied -> falls back to the source model's default.
+        user = FastUser()
+        self.assertEqual(user.age, 21)
+
+    def test_optional_scalar_field_keeps_type_and_is_nullable(self):
+        @dataclasses.dataclass
+        class DCUser:
+            username: str
+            nickname: Optional[str] = None
+            age: Optional[int] = None
+
+        FastUser = FastModel.bridge(DCUser)
+        rules = FastUser.get_rules()
+
+        # The inner scalar type must be preserved (previously became "any").
+        self.assertEqual(rules["nickname"], "str|nullable")
+        self.assertEqual(rules["age"], "int|nullable")
+
+        # None is accepted...
+        user = FastUser(username="alice")
+        self.assertIsNone(user.nickname)
+        self.assertIsNone(user.age)
+
+        # ...and the underlying type is still enforced when a value is given.
+        user2 = FastUser(username="bob", nickname="Bobby", age=30)
+        self.assertEqual(user2.nickname, "Bobby")
+        self.assertEqual(user2.age, 30)
+
+        with self.assertRaises(ValidationError):
+            FastUser(username="carol", nickname=123)
+
+    @unittest.skipUnless(HAS_PYDANTIC, "Pydantic not installed")
+    def test_optional_scalar_field_pydantic_keeps_constraints(self):
+        class PyUser(BaseModel):
+            username: str
+            age: Optional[int] = Field(default=None, ge=0)
+
+        FastUser = FastModel.bridge(PyUser)
+        rules = FastUser.get_rules()
+
+        # Constraint extracted from Field(ge=0) must survive alongside the
+        # inferred type and the nullable flag, with no duplication.
+        self.assertEqual(rules["age"], "int|min:0|nullable")
+
+        self.assertIsNone(FastUser(username="a").age)
+        with self.assertRaises(ValidationError):
+            FastUser(username="a", age=-1)
+
+    def test_optional_scalar_field_override_bypasses_inference(self):
+        @dataclasses.dataclass
+        class DCUser:
+            nickname: Optional[str] = None
+
+        FastUser = FastModel.bridge(
+            DCUser, field_overrides={"nickname": Rule(min=2, max=5)}
+        )
+        self.assertEqual(FastUser.get_rules()["nickname"], "str|min:2|max:5")
+
+
 if __name__ == "__main__":
     unittest.main()
