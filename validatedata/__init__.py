@@ -10,7 +10,7 @@ from .diagnose import diagnose
 from . import bridge as _bridge  # noqa: F401  (attaches FastModel.bridge)
 from .v import V
 
-__version__ = '0.7.2'
+__version__ = '0.7.3'
 
 __all__ = [
     'validate',
