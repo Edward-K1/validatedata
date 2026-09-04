@@ -92,6 +92,41 @@ def _extract_external_model(t: Any) -> Optional[type]:
     return None
 
 
+_SCALAR_TYPE_NAMES = {int, float, bool, str, list, tuple, set, dict}
+
+
+def _unwrap_optional_scalar(t: Any) -> Optional[Any]:
+    """
+    If `t` is Optional[X] / Union[X, None] / X | None for a plain scalar X
+    (int/float/bool/str/list/tuple/set/dict, including a subscripted generic
+    like `list[str]`), return X. Otherwise return None.
+
+    This only handles the *plain scalar* case - Optional[ExternalModel] is
+    already handled separately by `_extract_external_model` /
+    `_process_field`'s `ext_model` branch, and is not touched here.
+    """
+    origin = get_origin(t)
+    is_union = origin is Union or (hasattr(types, "UnionType") and origin is types.UnionType)
+    if not is_union:
+        return None
+
+    args = [a for a in get_args(t) if a is not type(None)]
+    if len(args) != 1:
+        # Not a simple Optional[X] (either not nullable, or a multi-member
+        # Union that isn't just "X or None") - leave it alone.
+        return None
+
+    inner = args[0]
+    if _is_external_model(inner):
+        # Nested-model Optionals are handled elsewhere.
+        return None
+
+    inner_origin = get_origin(inner) or inner
+    if inner_origin in _SCALAR_TYPE_NAMES:
+        return inner
+    return None
+
+
 def _get_type_hints(source_model: type) -> Dict[str, Any]:
     """Safely get type hints, falling back gracefully on older Python versions."""
     try:
@@ -214,6 +249,24 @@ def _process_field(
                 keep["default_factory"] = kwargs["default_factory"]
             namespace[name] = Rule(rule=e_rule, **keep)
     else:
+        # A field's presence in `kwargs` as "default"/"default_factory" means
+        # it's optional for *construction* purposes, but that is not the same
+        # thing as the field's value being allowed to be null/None. Only mark
+        # a field nullable when its annotation is actually Optional[...] /
+        # Union[..., None] (handled by the ext_model branch above for nested
+        # models, and by _unwrap_optional_scalar below for plain scalars) or
+        # when the caller explicitly asked for it via kwargs.
+        scalar = _unwrap_optional_scalar(annotation)
+        if scalar is not None:
+            # e.g. `nickname: Optional[str] = None` -> unwrap to `str` so the
+            # underlying type is still enforced (Optional[str] on its own
+            # resolves to `type: "any"` in FastModel, since Union isn't one
+            # of the types it infers a rule from), and mark nullable so the
+            # actual None case still validates.
+            annotations[name] = annotation  # keep the original Optional[...] for get_type_hints() consistency
+            scalar_origin = get_origin(scalar) or scalar
+            kwargs.setdefault("type", scalar_origin.__name__)
+            kwargs.setdefault("nullable", True)
         namespace[name] = Rule(**kwargs) if kwargs else _MISSING
 
 

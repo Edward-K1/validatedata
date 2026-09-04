@@ -323,6 +323,60 @@ class TestBridgeNullableRegressions(unittest.TestCase):
         user = FastUser()
         self.assertEqual(user.age, 21)
 
+    def test_optional_scalar_field_keeps_type_and_is_nullable(self):
+        @dataclasses.dataclass
+        class DCUser:
+            username: str
+            nickname: Optional[str] = None
+            age: Optional[int] = None
+
+        FastUser = FastModel.bridge(DCUser)
+        rules = FastUser.get_rules()
+
+        # The inner scalar type must be preserved (previously became "any").
+        self.assertEqual(rules["nickname"], "str|nullable")
+        self.assertEqual(rules["age"], "int|nullable")
+
+        # None is accepted...
+        user = FastUser(username="alice")
+        self.assertIsNone(user.nickname)
+        self.assertIsNone(user.age)
+
+        # ...and the underlying type is still enforced when a value is given.
+        user2 = FastUser(username="bob", nickname="Bobby", age=30)
+        self.assertEqual(user2.nickname, "Bobby")
+        self.assertEqual(user2.age, 30)
+
+        with self.assertRaises(ValidationError):
+            FastUser(username="carol", nickname=123)
+
+    @unittest.skipUnless(HAS_PYDANTIC, "Pydantic not installed")
+    def test_optional_scalar_field_pydantic_keeps_constraints(self):
+        class PyUser(BaseModel):
+            username: str
+            age: Optional[int] = Field(default=None, ge=0)
+
+        FastUser = FastModel.bridge(PyUser)
+        rules = FastUser.get_rules()
+
+        # Constraint extracted from Field(ge=0) must survive alongside the
+        # inferred type and the nullable flag, with no duplication.
+        self.assertEqual(rules["age"], "int|min:0|nullable")
+
+        self.assertIsNone(FastUser(username="a").age)
+        with self.assertRaises(ValidationError):
+            FastUser(username="a", age=-1)
+
+    def test_optional_scalar_field_override_bypasses_inference(self):
+        @dataclasses.dataclass
+        class DCUser:
+            nickname: Optional[str] = None
+
+        FastUser = FastModel.bridge(
+            DCUser, field_overrides={"nickname": Rule(min=2, max=5)}
+        )
+        self.assertEqual(FastUser.get_rules()["nickname"], "str|min:2|max:5")
+
 
 if __name__ == "__main__":
     unittest.main()
