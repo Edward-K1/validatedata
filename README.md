@@ -166,12 +166,16 @@ The same call works on a msgspec `Struct` or a plain `@dataclass` — `bridge()`
 |--------|---------------------|
 | `min_length` / `max_length` (Pydantic, msgspec) | `min` / `max` |
 | `ge` / `le` (Pydantic, msgspec) | `min` / `max` |
+| `gt` / `lt` (Pydantic, msgspec, annotated_types) | `gt` / `lt` |
+| `multiple_of` (Pydantic, msgspec, annotated_types) | `multiple_of` |
 | `pattern` (Pydantic, msgspec) | `pattern` |
 | `Literal[...]` (any source) | `choices` |
 | default / `default_factory` | `default` / `default_factory` |
 | nested model fields | recursively bridged, once per type |
 
-Constraints with no equivalent in validatedata's engine — msgspec's `tz` — raise a clear `ValueError` at bridge time rather than being silently dropped or loosened. 
+Constraints with no equivalent in validatedata's engine, currently only
+msgspec's ``tz``, raise ``ValueError`` at bridge time rather than being
+silently dropped or loosened.
 
 Other options, using the original `PyUser` (with `ge=18`) from above:
 
