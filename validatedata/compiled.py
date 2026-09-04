@@ -139,6 +139,32 @@ def _make_between(type_name: str, lo: int | float, hi: int | float) -> Callable[
 
 
 # ---------------------------------------------------------------------------
+# Exclusive bounds (gt / lt) and step (multiple_of)
+#
+# Unlike min/max, gt/lt/multiple_of only make sense against the value itself
+# (numeric types), never against a collection/string length — so there is no
+# _LEN_TYPES branch here, and non-numeric types are rejected at compile time.
+# ---------------------------------------------------------------------------
+
+def validate_gt(value: Any, bound: int | float) -> bool:
+    return value > bound
+
+def validate_lt(value: Any, bound: int | float) -> bool:
+    return value < bound
+
+def validate_multiple_of(value: Any, step: int | float) -> bool:
+    if step == 0:
+        return False
+    if isinstance(value, float) or isinstance(step, float):
+        remainder = value % step
+        # float modulo can land a hair either side of 0/step due to
+        # floating-point rounding — treat anything within a tiny epsilon
+        # of either boundary as an exact multiple.
+        return remainder < 1e-9 or (step - remainder) < 1e-9
+    return value % step == 0
+
+
+# ---------------------------------------------------------------------------
 # Fused type-and-range factories
 #
 # For the common pattern (strict type + sole range check) these collapse the
@@ -737,6 +763,44 @@ def _compile_pipe_rule(rule_str: str, *, _fuse: bool = True) -> tuple[Callable |
             if value is None:
                 raise ValueError(f"'max' requires a value in rule: {rule_str!r}")
             max_val = value
+            continue
+
+        if key == 'gt':
+            if value is None:
+                raise ValueError(f"'gt' requires a value in rule: {rule_str!r}")
+            if type_name not in _VAL_TYPES:
+                raise ValueError(
+                    f"'gt' is only supported on numeric types (int, float, even, "
+                    f"odd, prime), not {type_name!r}. Rule: {rule_str!r}"
+                )
+            bound = _coerce_range_val(value)
+            validators.append(_bind(validate_gt, bound))
+            continue
+
+        if key == 'lt':
+            if value is None:
+                raise ValueError(f"'lt' requires a value in rule: {rule_str!r}")
+            if type_name not in _VAL_TYPES:
+                raise ValueError(
+                    f"'lt' is only supported on numeric types (int, float, even, "
+                    f"odd, prime), not {type_name!r}. Rule: {rule_str!r}"
+                )
+            bound = _coerce_range_val(value)
+            validators.append(_bind(validate_lt, bound))
+            continue
+
+        if key == 'multiple_of':
+            if value is None:
+                raise ValueError(f"'multiple_of' requires a value in rule: {rule_str!r}")
+            if type_name not in _VAL_TYPES:
+                raise ValueError(
+                    f"'multiple_of' is only supported on numeric types (int, float, "
+                    f"even, odd, prime), not {type_name!r}. Rule: {rule_str!r}"
+                )
+            step = _coerce_range_val(value)
+            if step == 0:
+                raise ValueError(f"'multiple_of' cannot be 0 in rule: {rule_str!r}")
+            validators.append(_bind(validate_multiple_of, step))
             continue
 
         if key == 'between':

@@ -18,6 +18,58 @@ def _literal_choices(t: Any) -> Optional[list]:
     return None
 
 
+def _extract_annotated_types_constraints(t: Any, name: str) -> Dict[str, Any]:
+    """
+    Scan an Annotated[...] type for annotated_types constraint markers
+    (Gt, Lt, MultipleOf) and translate them into Rule kwargs.
+
+    This is the only source of gt/lt/multiple_of for plain dataclasses,
+    since the stdlib dataclasses module has no constraint metadata of its
+    own — authors express these constraints via
+    `Annotated[int, annotated_types.Gt(0)]` instead. It also serves as a
+    fallback for Pydantic/msgspec fields that use annotated_types markers
+    directly rather than Field(...)/Meta(...).
+
+    `annotated_types` is an optional dependency: if the annotation carries
+    no recognizable constraint markers, this function never needs it and
+    returns {}. It's only imported (and required) once a marker-shaped
+    object is actually found on the annotation.
+    """
+    metadata = getattr(t, "__metadata__", None)
+    if not metadata:
+        return {}
+
+    kwargs: Dict[str, Any] = {}
+    for arg in metadata:
+        type_name = type(arg).__name__
+        if type_name not in ("Gt", "Lt", "Ge", "Le", "MultipleOf"):
+            continue
+
+        try:
+            import annotated_types as at
+        except ImportError:
+            raise ImportError(
+                f"Field '{name}' uses an annotated_types constraint "
+                f"({type_name}), but the 'annotated_types' package is not "
+                f"installed, so it can't be verified as a real annotated_types "
+                f"marker (vs. an unrelated same-named class). Install it with: "
+                f"pip install annotated_types"
+            )
+
+        if isinstance(arg, at.Gt):
+            kwargs["gt"] = arg.gt
+        elif isinstance(arg, at.Lt):
+            kwargs["lt"] = arg.lt
+        elif isinstance(arg, at.Ge):
+            kwargs["min"] = arg.ge
+        elif isinstance(arg, at.Le):
+            kwargs["max"] = arg.le
+        elif isinstance(arg, at.MultipleOf):
+            kwargs["multiple_of"] = arg.multiple_of
+
+    return kwargs
+
+
 def _is_external_model(t: Any) -> bool:
     """Check if a type is a supported external model class."""
     return isinstance(t, type) and (
@@ -61,7 +113,14 @@ def _extract_instance_data(instance: Any) -> Dict[str, Any]:
         import dataclasses
         return dataclasses.asdict(instance)
     if hasattr(instance, "__struct_fields__"):
-        import msgspec
+        try:
+            import msgspec
+        except ImportError:
+            raise ImportError(
+                f"Bridging a msgspec Struct instance of '{type(instance).__name__}' "
+                f"requires the 'msgspec' package, which is not installed. Install it "
+                f"with: pip install msgspec"
+            )
         return {f.name: getattr(instance, f.name) for f in msgspec.structs.fields(instance)}
     return instance.__dict__
 
@@ -86,6 +145,16 @@ def _process_field(
 
     annotations[name] = annotation
     ext_model = _extract_external_model(annotation)
+
+    # Pick up annotated_types markers (Gt/Lt/Ge/Le/MultipleOf) directly from
+    # the annotation. This is the only path for plain dataclasses, and a
+    # fallback for Pydantic/msgspec fields that didn't already set these via
+    # Field(...)/Meta(...). Never overrides a constraint the model-specific
+    # branch already resolved, and never overrides explicit overrides/extra.
+    if name not in overrides and name not in extra:
+        at_kwargs = _extract_annotated_types_constraints(annotation, name)
+        for k, v in at_kwargs.items():
+            kwargs.setdefault(k, v)
 
     # Literal[...] annotations map to a `choices` constraint. This is checked
     # before the external-model branch since Literal is never an external model.
@@ -185,26 +254,13 @@ def build_bridged_model(
                 if hasattr(meta, "le") and meta.le is not None: kwargs["max"] = meta.le
                 gt = getattr(meta, "gt", None)
                 lt = getattr(meta, "lt", None)
-                if (gt is not None or lt is not None) and name not in overrides and name not in extra:
-                    which = "gt" if gt is not None else "lt"
-                    val = gt if gt is not None else lt
-                    raise ValueError(
-                        f"Pydantic field '{name}' uses {which}={val!r} (strict bound), "
-                        f"which has no equivalent in the validation engine (only inclusive "
-                        f"min/max are supported, no strict '>'/'<' operator). Bridging would "
-                        f"silently loosen this constraint, so it's rejected instead — pass an "
-                        f"explicit override via extra_rules for '{name}' if you want to bridge "
-                        f"this field anyway (e.g. an inclusive min/max approximation)."
-                    )
+                if gt is not None and name not in overrides and name not in extra:
+                    kwargs["gt"] = gt
+                if lt is not None and name not in overrides and name not in extra:
+                    kwargs["lt"] = lt
                 if hasattr(meta, "pattern") and meta.pattern is not None: kwargs["pattern"] = meta.pattern
                 if getattr(meta, "multiple_of", None) is not None and name not in overrides and name not in extra:
-                    raise ValueError(
-                        f"Pydantic field '{name}' uses multiple_of={meta.multiple_of!r}, "
-                        f"which has no equivalent in the validation engine (no step/modulo "
-                        f"validator token). Bridging would silently drop this constraint, so "
-                        f"it's rejected instead — pass an explicit override via extra_rules "
-                        f"for '{name}' if you want to bridge this field anyway."
-                    )
+                    kwargs["multiple_of"] = meta.multiple_of
                 
             if not field.is_required():
                 if field.default_factory is not None:
@@ -216,7 +272,14 @@ def build_bridged_model(
 
     # 2. Msgspec Integration
     elif hasattr(source_model, "__struct_fields__"):
-        import msgspec
+        try:
+            import msgspec
+        except ImportError:
+            raise ImportError(
+                f"Bridging msgspec Struct '{source_model.__name__}' requires the "
+                f"'msgspec' package, which is not installed. Install it with: "
+                f"pip install msgspec"
+            )
         hints = _get_type_hints(source_model)
             
         for field in msgspec.structs.fields(source_model):
@@ -233,28 +296,13 @@ def build_bridged_model(
                         if arg.le is not None: kwargs["max"] = arg.le
                         gt = getattr(arg, "gt", None)
                         lt = getattr(arg, "lt", None)
-                        if (gt is not None or lt is not None) and name not in overrides and name not in extra:
-                            which = "gt" if gt is not None else "lt"
-                            val = gt if gt is not None else lt
-                            raise ValueError(
-                                f"msgspec field '{name}' uses {which}={val!r} (strict bound), "
-                                f"which has no equivalent in the validation engine (only "
-                                f"inclusive min/max are supported, no strict '>'/'<' operator). "
-                                f"Bridging would silently loosen this constraint, so it's "
-                                f"rejected instead — pass an explicit override via extra_rules "
-                                f"for '{name}' if you want to bridge this field anyway (e.g. an "
-                                f"inclusive min/max approximation)."
-                            )
+                        if gt is not None and name not in overrides and name not in extra:
+                            kwargs["gt"] = gt
+                        if lt is not None and name not in overrides and name not in extra:
+                            kwargs["lt"] = lt
                         if arg.pattern is not None: kwargs["pattern"] = arg.pattern
                         if getattr(arg, "multiple_of", None) is not None and name not in overrides and name not in extra:
-                            raise ValueError(
-                                f"msgspec field '{name}' uses multiple_of={arg.multiple_of!r}, "
-                                f"which has no equivalent in the validation engine (no step/"
-                                f"modulo validator token). Bridging would silently drop this "
-                                f"constraint, so it's rejected instead — pass an explicit "
-                                f"override via extra_rules for '{name}' if you want to bridge "
-                                f"this field anyway."
-                            )
+                            kwargs["multiple_of"] = arg.multiple_of
                         if getattr(arg, "tz", None) is not None and name not in overrides and name not in extra:
                             raise ValueError(
                                 f"msgspec field '{name}' uses tz={arg.tz!r} (timezone-awareness "

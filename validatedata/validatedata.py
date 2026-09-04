@@ -500,6 +500,9 @@ _PIPE_VALUE_KEYWORDS = frozenset(
         "of:",
         "length:",
         "region:",
+        "gt:",
+        "lt:",
+        "multiple_of:",
     }
 )
 

@@ -8,7 +8,7 @@ Lightning-fast validation in python.
 
 1. **`validator()`** – One word: speed. Ideal for high‑throughput streaming. msgspec, handwritten code, and this function will compete for first place.
 2. **`FastModel`** – declarative, typed models with compiled validation, rich error messages, serialization, and one-line bridging from Pydantic, msgspec, or dataclasses.
-3. **`V`** – fast validation using simple inline checks, e.g if V.int(5), V.email("not"). Returns bool by default but user can enable exceptions
+3. **`V`** – fast validation using simple inline checks for both types and constraints (e.g., V.int(5), V.between(1, 10, 5)). Returns bool by default but user can enable exceptions.
 4. **`validate_data()`** / **`validate_data_fast()`** – general‑purpose validation with detailed errors, nested structures, and optional mutation.
 5. **`@validate`** – decorator for function argument validation.
 6. **`@validate_types`** – decorator that uses Python type annotations.
@@ -171,14 +171,7 @@ The same call works on a msgspec `Struct` or a plain `@dataclass` — `bridge()`
 | default / `default_factory` | `default` / `default_factory` |
 | nested model fields | recursively bridged, once per type |
 
-Constraints with no equivalent in validatedata's engine — `gt`/`lt` (strict bounds), `multiple_of`, and msgspec's `tz` — raise a clear `ValueError` at bridge time rather than being silently dropped or loosened. For example, if `age` above had used `Field(gt=18)` instead of `Field(ge=18)`, bridging would raise unless you hand it a rule yourself:
-
-```python
-FastUser = FastModel.bridge(
-    PyUser,
-    extra_rules={"age": "int|min:19"},   # your own translation of gt=18
-)
-```
+Constraints with no equivalent in validatedata's engine — msgspec's `tz` — raise a clear `ValueError` at bridge time rather than being silently dropped or loosened. 
 
 Other options, using the original `PyUser` (with `ge=18`) from above:
 
@@ -196,18 +189,26 @@ bridged_user = FastModel.bridge(existing_user)
 
 ## Single‑line checks with `V`
 
-Sometimes you don't want a `Rule`, a `FastModel`, or a rule dict — you just want to ask one question about one value, inline:
+Sometimes you don't want a `Rule`, a `FastModel`, or a rule dict — you just want to ask one question about a type or constraint, inline:
 
 ```python
 from validatedata import V
 
 if V.int(5):
     ...
+if V.between(1, 10, 5):
+    ...
 if not V.email(user_input):
     raise ValueError("bad email")
 ```
 
-`V` covers the same base types as `validator()` — `int`, `str`, `float`, `bool`, `list`, `dict`, `tuple`, `set`, plus format checks like `email`, `url`, `uuid`, `date`, `ip`, `phone`, `slug`, `semver`, `color`, `even`, `odd`, `prime`, `decimal`, `path`. Each check is a plain function on the class — no instantiation, no rule string, nothing to compile.
+`V` covers both base types (int, str, float, bool, list, dict, tuple, set, decimal, path, date, datetime, semantic checks like email, url, uuid, ip, phone, slug, semver, color, even, odd, prime) and inline constraints with the config first and value last:
+
+Ranges & Comparisons: `V.between(min, max, value)`, `V.gt(bound, value)`, `V.ge(bound, value)`, `V.lt(bound, value)`, `V.le(bound, value)`
+
+String & Iterable Checks: `V.length(n, value)`, `V.min_length(n, value)`, `V.max_length(n, value)`, `V.contains(item, value)`, `V.excludes(item, value)`, `V.starts_with(prefix, value)`, `V.ends_with(suffix, value)`
+
+Advanced Constraints: `V.multiple_of(step, value)`, `V.regex(pattern, value)` (cached), `V.unique(value)`, `V.one_of(choices, value)`, `V.none_of(choices, value)`
 
 By default a failed check just returns `False`. Call `V.raise_on_fail(True)` to switch every check to a raising variant that throws `TypeError` naming the expected and actual types, instead of returning `False`:
 
@@ -223,7 +224,6 @@ V.int("not an int")      # False
 For a type that isn't one of `V`'s predeclared attributes — a type you registered with `register_type`, or a plain Python/stdlib type — use `V.check(name, value)`:
 
 ```python
-V.check("datetime", some_dt)
 V.check("MyRegisteredType", obj)
 ```
 
@@ -1247,12 +1247,12 @@ if not result.ok:
 Contributions are welcome!
 
 **Before starting work on a new feature or non-trivial change, please open an issue first.**
-This helps avoid duplicate effort and lets us align on scope and approach before any code is written.
+
 
 ### Getting Started
 
 1. Open an issue describing what you'd like to add or change
-2. You'll be informed if there's someone working on it and given the green light if it's the right call
+2. You'll be informed if there's someone working on it to avoid duplicate work and to ensure its the right call.
 2. Fork the repository and create a branch off `main`
 ```
    git checkout -b feature/your-feature-name
