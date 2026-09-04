@@ -11,7 +11,7 @@ authors = [
 description = "Lightning-fast validation in python."
 readme = "README.md"
 # Updated to the new SPDX string format to silence warnings
-license = "MIT"
+license = "Apache-2.0"
 requires-python = ">=3.8"
 
 keywords = ["validate", "data", "validation"]
